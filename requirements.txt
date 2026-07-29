@@ -1,0 +1,4 @@
+# Runtime dependencies shared by both desktop simulators.
+numpy>=1.23
+matplotlib>=3.6
+Pillow>=9.2

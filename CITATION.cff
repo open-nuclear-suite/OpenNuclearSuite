@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Open Nuclear Engineering Teaching Suite"
+type: software
+authors:
+  - family-names: "Sies"
+    given-names: "Mohsin Mohd"
+    affiliation: "Nuclear Engineering Program, Faculty of Chemical and Energy Engineering, Universiti Teknologi Malaysia"
+    email: "mohsin.sies@gmail.com"
+repository-code: "https://github.com/open-nuclear-suite/OpenNuclearSuite"
+license: MIT
+abstract: >-
+  Interactive Windows desktop simulators for teaching introductory reactor
+  physics, kinetics, light-water-reactor thermal-hydraulics, and LOCA behavior.
+keywords:
+  - nuclear engineering education
+  - reactor physics
+  - reactor kinetics
+  - thermal hydraulics
+  - LOCA
