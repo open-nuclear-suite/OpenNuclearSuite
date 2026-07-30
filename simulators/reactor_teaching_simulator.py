@@ -289,9 +289,10 @@ class ReactorState:
         # Decay heat groups. Fractions and time constants are classroom-scaled.
         self.decay_frac = np.array([0.040, 0.018, 0.007], dtype=float)
         self.decay_tau = np.array([12.0, 120.0, 1200.0], dtype=float)
+        self.prompt_frac = 1.0 - float(np.sum(self.decay_frac))
         self.Dh = self.decay_frac * self.P
         self.Qdecay = float(np.sum(self.Dh))
-        self.Qheat = self.P + self.Qdecay
+        self.Qheat = self.prompt_frac * self.P + self.Qdecay
 
         # Iodine/xenon model. Time constants are intentionally accelerated.
         self.lambdaI = math.log(2) / 60.0
@@ -323,9 +324,9 @@ class ReactorState:
         self.coolantFlow = 100.0
         self.heatSink = 100.0
         self.inletT = 285.0
-        self.fuelT = 580.0
-        self.cladT = 435.0
-        self.coolT = 350.0
+        self.fuelT = 565.0
+        self.cladT = 425.0
+        self.coolT = 345.0
         self.Tf_ref = self.fuelT
         self.Tc_ref = self.coolT
         self.alpha_f = -3.0e-6
@@ -606,7 +607,7 @@ class ReactorModel:
             dDh = (s.decay_frac * s.P - s.Dh) / s.decay_tau
             s.Dh = np.maximum(s.Dh + dDh * s.dt, 0.0)
             s.Qdecay = float(np.sum(s.Dh))
-            s.Qheat = s.P + s.Qdecay
+            s.Qheat = s.prompt_frac * s.P + s.Qdecay
 
             # Iodine/xenon poisoning.
             dI = s.lambdaI * s.P - s.lambdaI * s.I

@@ -1119,6 +1119,9 @@ class LWRTeachingSimulator:
         return max(lo, min(hi, x))
 
     def pressure_eccs_factor(self, P: float) -> float:
+        # Classroom-scale staged injection: accumulator/injection trains become
+        # available as pressure crosses 14 MPa and 2 MPa, so the factor is
+        # intentionally discontinuous at those thresholds.
         if P > 14.0:
             f = 0.05
         elif P > 8.0:

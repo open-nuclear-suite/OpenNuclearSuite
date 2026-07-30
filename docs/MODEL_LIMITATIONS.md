@@ -30,6 +30,11 @@ analysis.
 Scenario results should therefore be interpreted as qualitative trends. A
 plausible-looking numerical value is not evidence of physical accuracy.
 
+The thermal-hydraulics model represents staged ECCS injection with intentional
+changes in injection effectiveness at 14 MPa and 2 MPa. These classroom-scale
+thresholds illustrate the availability of different injection trains; they are
+not plant-specific equipment setpoints or continuous pump-performance curves.
+
 ## Classroom practice
 
 Instructors should identify the assumptions relevant to each exercise, compare
