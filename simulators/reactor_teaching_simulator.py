@@ -61,21 +61,22 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 # ============================================================
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
-LOGO_FILENAME = "UTM.logo.png"
+SPLASH_LOGO_FILENAME = "UTM.logo.png"
+BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 
-def find_logo_path():
-    """Return the first available UTM logo path.
+def find_logo_path(filename):
+    """Return the first available branding image with the requested filename.
 
-    The repository's shared assets directory is the recommended deployment
-    arrangement. Local and current-working-directory fallbacks help during
-    development.
+    Repository-root, local, and current-working-directory locations are
+    supported so the simulator can be launched from outside the repository.
     """
     candidates = [
-        Path(__file__).resolve().parent / LOGO_FILENAME,
-        Path(__file__).resolve().parent.parent / "assets" / LOGO_FILENAME,
-        Path.cwd() / LOGO_FILENAME,
-        Path.cwd() / "assets" / LOGO_FILENAME,
+        Path(__file__).resolve().parent / filename,
+        Path(__file__).resolve().parent.parent / filename,
+        Path(__file__).resolve().parent.parent / "assets" / filename,
+        Path.cwd() / filename,
+        Path.cwd() / "assets" / filename,
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -83,15 +84,14 @@ def find_logo_path():
     return None
 
 
-def load_logo_image(master, max_width, max_height=None):
-    """Load the complete UTM logo and fit it proportionally inside a box.
+def load_logo_image(master, max_width, max_height=None, filename=BANNER_LOGO_FILENAME):
+    """Load a branding image and fit it proportionally inside a box.
 
     Pillow is used when available for smooth, exact resizing. If Pillow is not
     installed, Tkinter's built-in PNG loader is used with integer subsampling.
-    Neither path crops the image; the full crest, UTM lettering, and university
-    name remain visible.
+    Neither path crops the image.
     """
-    logo_path = find_logo_path()
+    logo_path = find_logo_path(filename)
     if logo_path is None:
         return None
 
@@ -119,7 +119,7 @@ def load_logo_image(master, max_width, max_height=None):
     except tk.TclError:
         return None
 
-def show_startup_splash(root, module_name, duration_ms=2000):
+def show_startup_splash(root, module_name, duration_ms=3000):
     """Show a centred, borderless project splash, then reveal the dashboard."""
     splash = tk.Toplevel(root)
     splash.overrideredirect(True)
@@ -134,7 +134,12 @@ def show_startup_splash(root, module_name, duration_ms=2000):
     panel = tk.Frame(border, bg="#12161c", padx=34, pady=24)
     panel.pack(fill="both", expand=True)
 
-    splash.logo_image = load_logo_image(splash, max_width=720, max_height=245)
+    splash.logo_image = load_logo_image(
+        splash,
+        max_width=720,
+        max_height=245,
+        filename=SPLASH_LOGO_FILENAME,
+    )
     if splash.logo_image is not None:
         tk.Label(panel, image=splash.logo_image, bg="#12161c", bd=0).pack(pady=(0, 18))
     else:
@@ -1258,7 +1263,9 @@ class ReactorTeachingSimulatorTk:
             font=("Segoe UI", 9), anchor="w",
         ).pack(anchor="w", pady=(2, 0))
 
-        self.utm_logo_image = load_logo_image(self.root, max_width=320, max_height=108)
+        # About 2 mm taller than the thermal banner's earlier 62 px rendering
+        # at the standard 96-DPI desktop scale.
+        self.utm_logo_image = load_logo_image(self.root, max_width=700, max_height=70)
         if self.utm_logo_image is not None:
             tk.Label(
                 header, image=self.utm_logo_image, bg=self.colors["bg"], bd=0,
@@ -1733,7 +1740,7 @@ def main():
     show_startup_splash(
         root,
         module_name="Reactor Physics and Kinetics Simulator",
-        duration_ms=2000,
+        duration_ms=3000,
     )
     root.mainloop()
 

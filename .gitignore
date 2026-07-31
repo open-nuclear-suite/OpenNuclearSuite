@@ -8,12 +8,15 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.build-venv/
 venv/
 env/
 
 # Packaging output
 build/
+build-specs/
 dist/
+release/
 *.egg-info/
 
 # Editors and operating systems

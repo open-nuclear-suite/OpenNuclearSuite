@@ -84,6 +84,19 @@ After setup, Windows users can instead double-click
 The applications are independent; close one before launching the other if
 screen space or system memory is limited.
 
+## Building standalone Windows executables
+
+From PowerShell on Windows, run:
+
+```powershell
+.\build_standalone_windows.ps1
+```
+
+The script creates one-file, windowed executables for both simulators under
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows`. The release
+also includes the license, citation metadata, Windows instructions, and
+SHA-256 checksums. End users do not need Python installed.
+
 ## First use
 
 1. Start a simulator and wait for the splash screen to close.

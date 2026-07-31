@@ -66,16 +66,18 @@ from matplotlib.figure import Figure
 # ---------------------------------------------------------------------------
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
-LOGO_FILENAME = "UTM.logo.png"
+SPLASH_LOGO_FILENAME = "UTM.logo.png"
+BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 
-def find_logo_path() -> Optional[Path]:
-    """Return the first available UTM logo path."""
+def find_logo_path(filename: str) -> Optional[Path]:
+    """Return the first available branding image with the requested filename."""
     candidates = [
-        Path(__file__).resolve().parent / LOGO_FILENAME,
-        Path(__file__).resolve().parent.parent / "assets" / LOGO_FILENAME,
-        Path.cwd() / LOGO_FILENAME,
-        Path.cwd() / "assets" / LOGO_FILENAME,
+        Path(__file__).resolve().parent / filename,
+        Path(__file__).resolve().parent.parent / filename,
+        Path(__file__).resolve().parent.parent / "assets" / filename,
+        Path.cwd() / filename,
+        Path.cwd() / "assets" / filename,
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -84,16 +86,18 @@ def find_logo_path() -> Optional[Path]:
 
 
 def load_logo_image(
-    master: tk.Misc, max_width: int, max_height: Optional[int] = None
+    master: tk.Misc,
+    max_width: int,
+    max_height: Optional[int] = None,
+    filename: str = BANNER_LOGO_FILENAME,
 ) -> Optional[tk.PhotoImage]:
-    """Load the complete UTM logo and fit it proportionally inside a box.
+    """Load a branding image and fit it proportionally inside a box.
 
     Pillow is used when available for smooth, exact resizing. If Pillow is not
     installed, Tkinter's built-in PNG loader is used with integer subsampling.
-    Neither path crops the image; the full crest, UTM lettering, and university
-    name remain visible.
+    Neither path crops the image.
     """
-    logo_path = find_logo_path()
+    logo_path = find_logo_path(filename)
     if logo_path is None:
         return None
 
@@ -122,7 +126,7 @@ def load_logo_image(
         return None
 
 def show_startup_splash(
-    root: tk.Tk, module_name: str, duration_ms: int = 2000
+    root: tk.Tk, module_name: str, duration_ms: int = 3000
 ) -> None:
     """Show a centred, borderless project splash, then reveal the dashboard."""
     splash = tk.Toplevel(root)
@@ -138,7 +142,12 @@ def show_startup_splash(
     panel = tk.Frame(border, bg="#15181d", padx=34, pady=24)
     panel.pack(fill="both", expand=True)
 
-    splash.logo_image = load_logo_image(splash, max_width=720, max_height=245)
+    splash.logo_image = load_logo_image(
+        splash,
+        max_width=720,
+        max_height=245,
+        filename=SPLASH_LOGO_FILENAME,
+    )
     if splash.logo_image is not None:
         tk.Label(panel, image=splash.logo_image, bg="#15181d", bd=0).pack(pady=(0, 18))
     else:
@@ -402,18 +411,18 @@ class LWRTeachingSimulator:
             title_block,
             bg="#0e1013", fg="#f4f4f4",
             font=("Segoe UI", 12, "bold"), anchor="w",
-            text="LIGHT WATER REACTOR THERMAL-HYDRAULICS TRAINING PANEL  |  Point kinetics + lumped LOCA model",
+            text="LIGHT WATER REACTOR THERMAL-HYDRAULICS TRAINING PANEL",
         ).pack(anchor="w")
         tk.Label(
             title_block, text=PROJECT_NAME, bg="#0e1013", fg="#b8c2cc",
             font=("Segoe UI", 9), anchor="w",
         ).pack(anchor="w", pady=(3, 0))
 
-        self.utm_logo_image = load_logo_image(self.root, max_width=320, max_height=108)
+        self.utm_logo_image = load_logo_image(self.root, max_width=800, max_height=80)
         if self.utm_logo_image is not None:
             tk.Label(
                 header, image=self.utm_logo_image, bg="#0e1013", bd=0,
-            ).pack(side=tk.RIGHT, padx=(12, 14), pady=5)
+            ).pack(side=tk.RIGHT, padx=(12, 14))
         else:
             tk.Label(
                 header, text="UTM", bg="#7d1238", fg="white",
@@ -1435,7 +1444,7 @@ def main() -> None:
     show_startup_splash(
         root,
         module_name="Thermal-Hydraulics and LOCA Simulator",
-        duration_ms=2000,
+        duration_ms=3000,
     )
     root.mainloop()
 
