@@ -25,6 +25,8 @@ repository root.
 - Automatic reactor trip and pressure-dependent ECCS response
 - Steam-generator, AFW, PORV, spray, heater, and RHR controls
 - Scripted recovery demonstrations and CSV transient logging
+- Timestamped event timeline for protection, ECCS, inventory, CHF, boiling,
+  thermal-limit, recovery, and scenario transitions
 
 ## Verification
 
@@ -35,8 +37,8 @@ python -m unittest discover -s simulators/ThermalHydraulicsSimulator -p "test_*.
 ```
 
 The tests cover nominal equilibrium, saturation-table consistency, coolant
-mass/energy synchronization, ECCS enthalpy transport, and CHF transition under
-loss of flow.
+mass/energy synchronization, ECCS enthalpy transport, CHF transition under
+loss of flow, and event-timeline transition and duplicate-suppression behavior.
 
 ## Scope
 

@@ -72,10 +72,13 @@ BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 def find_logo_path(filename: str) -> Optional[Path]:
     """Return the first available branding image with the requested filename."""
+    module_dir = Path(__file__).resolve().parent
+    project_root = module_dir.parents[1]
     candidates = [
-        Path(__file__).resolve().parent / filename,
-        Path(__file__).resolve().parent.parent / filename,
-        Path(__file__).resolve().parent.parent / "assets" / filename,
+        module_dir / filename,
+        module_dir.parent / filename,
+        project_root / filename,
+        project_root / "assets" / filename,
         Path.cwd() / filename,
         Path.cwd() / "assets" / filename,
     ]
@@ -352,6 +355,13 @@ class State:
         self.hist.clear()
 
 
+@dataclass(frozen=True)
+class TimelineEvent:
+    time_s: float
+    category: str
+    message: str
+
+
 # ---------------------------------------------------------------------------
 # GUI application
 # ---------------------------------------------------------------------------
@@ -377,6 +387,9 @@ class LWRTeachingSimulator:
         self.value_labels: Dict[str, ttk.Label] = {}
         self.readout_vars: Dict[str, tk.StringVar] = {}
         self.lamps: Dict[str, tk.Label] = {}
+        self.events: Deque[TimelineEvent] = deque(maxlen=250)
+        self.event_snapshot: Dict[str, object] = {}
+        self.last_event_time: Dict[str, float] = {}
 
         self.auto_eccs_var = tk.BooleanVar(value=True)
         self.auto_trip_var = tk.BooleanVar(value=True)
@@ -397,6 +410,7 @@ class LWRTeachingSimulator:
 
         self._make_style()
         self._build_gui()
+        self.reset_event_timeline()
         self.refresh_all(force=True)
         self._schedule_loop()
 
@@ -454,14 +468,54 @@ class LWRTeachingSimulator:
         plot_frame = ttk.Frame(main, style="TFrame")
         plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
 
-        panel = ttk.Frame(main, style="Panel.TFrame", padding=12)
-        panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False)
-        panel.configure(width=620)
+        panel_host = ttk.Frame(main, style="Panel.TFrame", width=620)
+        panel_host.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False)
+        panel_host.pack_propagate(False)
+
+        self.control_canvas = tk.Canvas(
+            panel_host,
+            width=600,
+            bg="#2a2d33",
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        control_scroll = ttk.Scrollbar(
+            panel_host, orient=tk.VERTICAL, command=self.control_canvas.yview
+        )
+        self.control_canvas.configure(yscrollcommand=control_scroll.set)
+        control_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        panel = ttk.Frame(self.control_canvas, style="Panel.TFrame", padding=12)
+        self.control_panel_window = self.control_canvas.create_window(
+            (0, 0), window=panel, anchor="nw"
+        )
+        panel.bind("<Configure>", self._on_control_panel_configure)
+        self.control_canvas.bind("<Configure>", self._on_control_canvas_configure)
+        self.control_canvas.bind("<MouseWheel>", self._scroll_control_panel)
 
         ttk.Label(panel, style="PanelTitle.TLabel", text="CONTROL PANEL").pack(anchor="w", pady=(0, 8))
 
         self._build_plots(plot_frame)
         self._build_controls(panel)
+        self._bind_control_mousewheel(panel)
+
+    def _on_control_panel_configure(self, _event: tk.Event) -> None:
+        self.control_canvas.configure(scrollregion=self.control_canvas.bbox("all"))
+
+    def _on_control_canvas_configure(self, event: tk.Event) -> None:
+        self.control_canvas.itemconfigure(self.control_panel_window, width=event.width)
+
+    def _bind_control_mousewheel(self, widget: tk.Misc) -> None:
+        if isinstance(widget, ttk.Treeview):
+            return
+        widget.bind("<MouseWheel>", self._scroll_control_panel, add="+")
+        for child in widget.winfo_children():
+            self._bind_control_mousewheel(child)
+
+    def _scroll_control_panel(self, event: tk.Event) -> None:
+        direction = -1 if event.delta > 0 else 1
+        self.control_canvas.yview_scroll(direction, "units")
 
     def _build_plots(self, parent: ttk.Frame) -> None:
         self.fig = Figure(figsize=(7.2, 7.5), dpi=100, facecolor="#202226")
@@ -628,6 +682,38 @@ class LWRTeachingSimulator:
         for key, label in (("inv", "INV"), ("tcl", "CLAD"), ("tfuel", "FUEL"), ("rho", "RHO")):
             self.make_readout(right_ro, key, label)
 
+        timeline_title = ttk.Frame(parent, style="Panel.TFrame")
+        timeline_title.pack(fill=tk.X, pady=(4, 2))
+        ttk.Label(
+            timeline_title, style="Text.TLabel", font=("Segoe UI", 9, "bold"),
+            text="EVENT TIMELINE",
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            timeline_title, text="CLEAR", command=self.clear_event_timeline,
+        ).pack(side=tk.RIGHT)
+
+        timeline_frame = ttk.Frame(parent, style="Panel.TFrame")
+        timeline_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.event_tree = ttk.Treeview(
+            timeline_frame,
+            columns=("time", "category", "event"),
+            show="headings",
+            height=5,
+            selectmode="browse",
+        )
+        self.event_tree.heading("time", text="Time")
+        self.event_tree.heading("category", text="Type")
+        self.event_tree.heading("event", text="Event")
+        self.event_tree.column("time", width=64, minwidth=58, anchor="e", stretch=False)
+        self.event_tree.column("category", width=84, minwidth=72, anchor="w", stretch=False)
+        self.event_tree.column("event", width=390, minwidth=220, anchor="w")
+        event_scroll = ttk.Scrollbar(
+            timeline_frame, orient=tk.VERTICAL, command=self.event_tree.yview
+        )
+        self.event_tree.configure(yscrollcommand=event_scroll.set)
+        self.event_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        event_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
         self.status_var = tk.StringVar(value="")
         status = tk.Label(
             parent,
@@ -732,6 +818,7 @@ class LWRTeachingSimulator:
         self.auto_eccs_var.set(True)
         self.auto_trip_var.set(True)
         self.state.autoECCS = True
+        self.reset_event_timeline()
         self.refresh_all(force=True)
 
     def set_slider(self, key: str, value: float) -> None:
@@ -772,6 +859,106 @@ class LWRTeachingSimulator:
 
     def _sync_auto_eccs(self) -> None:
         self.state.autoECCS = bool(self.auto_eccs_var.get())
+
+    # --------------------------- Event timeline --------------------------
+
+    def eccs_is_active(self) -> bool:
+        s = self.state
+        manual = self.control_vars["eccs"].get() > 1.0
+        automatic = bool(self.auto_eccs_var.get()) and (
+            (s.P < 12.0 and s.M < 0.92)
+            or s.Tcl > 450.0
+            or (s.P < 4.5 and s.M < 1.05)
+            or (s.P < 2.0 and s.M < 1.10)
+        )
+        return manual or automatic
+
+    def current_event_state(self) -> Dict[str, object]:
+        s = self.state
+        return {
+            "scenario": s.scenario_name,
+            "trip": s.trip,
+            "eccs": self.eccs_is_active(),
+            "low_inventory": s.M < self.c.invLow,
+            "high_clad": s.Tcl > self.c.cladWarn,
+            "chf": s.chf_ratio >= 1.0,
+            "regime": s.boiling_regime,
+        }
+
+    def record_event(
+        self, category: str, message: str, *, key: Optional[str] = None,
+        minimum_interval_s: float = 0.0,
+    ) -> bool:
+        event_key = key or f"{category}:{message}"
+        previous_time = self.last_event_time.get(event_key, -1.0e30)
+        if self.state.t - previous_time < minimum_interval_s:
+            return False
+        event = TimelineEvent(self.state.t, category, message)
+        self.events.append(event)
+        self.last_event_time[event_key] = self.state.t
+        if hasattr(self, "event_tree"):
+            self.event_tree.insert(
+                "", tk.END,
+                values=(f"{event.time_s:.1f} s", event.category, event.message),
+            )
+            children = self.event_tree.get_children()
+            while len(children) > self.events.maxlen:
+                self.event_tree.delete(children[0])
+                children = self.event_tree.get_children()
+            if children:
+                self.event_tree.see(children[-1])
+        return True
+
+    def reset_event_timeline(self) -> None:
+        self.events.clear()
+        self.last_event_time.clear()
+        if hasattr(self, "event_tree"):
+            for item in self.event_tree.get_children():
+                self.event_tree.delete(item)
+        self.event_snapshot = self.current_event_state()
+        self.record_event("SYSTEM", f"{self.state.scenario_name} initialized")
+
+    def clear_event_timeline(self) -> None:
+        self.events.clear()
+        self.last_event_time.clear()
+        if hasattr(self, "event_tree"):
+            for item in self.event_tree.get_children():
+                self.event_tree.delete(item)
+        self.event_snapshot = self.current_event_state()
+
+    def set_scenario(self, name: str) -> None:
+        if name == self.state.scenario_name:
+            return
+        self.state.scenario_name = name
+        self.record_event("SCENARIO", f"Selected {name}")
+        self.event_snapshot["scenario"] = name
+
+    def detect_timeline_events(self) -> None:
+        current = self.current_event_state()
+        previous = self.event_snapshot or current
+
+        transitions = (
+            ("trip", "PROTECTION", "Reactor trip actuated", "Reactor trip reset"),
+            ("eccs", "SAFETY", "ECCS injection started", "ECCS injection stopped"),
+            ("low_inventory", "INVENTORY", "Low primary inventory", "Primary inventory recovered"),
+            ("high_clad", "THERMAL", "High cladding temperature", "Cladding temperature recovered"),
+            ("chf", "BOILING", "Critical heat flux exceeded", "Heat flux returned below CHF"),
+        )
+        for state_key, category, active_message, clear_message in transitions:
+            if current[state_key] != previous.get(state_key):
+                self.record_event(
+                    category,
+                    active_message if current[state_key] else clear_message,
+                    key=state_key,
+                    minimum_interval_s=0.25,
+                )
+
+        if current["regime"] != previous.get("regime"):
+            self.record_event(
+                "BOILING", f"Heat-transfer regime: {current['regime']}",
+                key="boiling_regime", minimum_interval_s=1.0,
+            )
+        self.event_snapshot = current
 
     # ----------------------------- Demo mode ------------------------------
 
@@ -1013,7 +1200,7 @@ class LWRTeachingSimulator:
     # ----------------------------- Scenarios ------------------------------
 
     def scenario_normal(self) -> None:
-        self.state.scenario_name = "Normal operation"
+        self.set_scenario("Normal operation")
         self.state.trip = False
         self.set_slider("rod", 0)
         self.set_slider("trim", 0)
@@ -1033,7 +1220,7 @@ class LWRTeachingSimulator:
         self.refresh_all(force=False)
 
     def scenario_sbloc(self) -> None:
-        self.state.scenario_name = "Small-break LOCA"
+        self.set_scenario("Small-break LOCA")
         self.state.trip = True
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
@@ -1051,7 +1238,7 @@ class LWRTeachingSimulator:
         self.refresh_all(force=False)
 
     def scenario_lbloc(self) -> None:
-        self.state.scenario_name = "Large-break LOCA"
+        self.set_scenario("Large-break LOCA")
         self.state.trip = True
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
@@ -1069,7 +1256,7 @@ class LWRTeachingSimulator:
         self.refresh_all(force=False)
 
     def scenario_lofa(self) -> None:
-        self.state.scenario_name = "Loss of flow accident"
+        self.set_scenario("Loss of flow accident")
         self.state.trip = True
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
@@ -1085,7 +1272,7 @@ class LWRTeachingSimulator:
         self.refresh_all(force=False)
 
     def scenario_lohs(self) -> None:
-        self.state.scenario_name = "Loss of heat sink"
+        self.set_scenario("Loss of heat sink")
         self.state.trip = True
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
@@ -1101,7 +1288,7 @@ class LWRTeachingSimulator:
         self.refresh_all(force=False)
 
     def scenario_sbo(self) -> None:
-        self.state.scenario_name = "Station blackout"
+        self.set_scenario("Station blackout")
         self.state.trip = True
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
@@ -1401,6 +1588,7 @@ class LWRTeachingSimulator:
         s.P = self.saturation_pressure(s.Tprz)
 
         s.t += dt
+        self.detect_timeline_events()
         self.append_history(decay_frac_now, rho_total, flow_eff)
 
     def append_history(self, decay_frac_now: float, rho_total: float, flow_eff: float) -> None:
@@ -1509,10 +1697,7 @@ class LWRTeachingSimulator:
         self.readout_vars["tfuel"].set(f"{s.Tf:7.0f} C")
         self.readout_vars["rho"].set(f"{rho_pcm:7.0f} pcm")
 
-        eccs_on = (
-            self.control_vars["eccs"].get() > 1.0
-            or (bool(self.auto_eccs_var.get()) and (((s.P < 12.0 and s.M < 0.92) or s.Tcl > 450.0)))
-        )
+        eccs_on = self.eccs_is_active()
         self.set_lamp("REACTOR TRIP", s.trip)
         self.set_lamp("ECCS ACTIVE", eccs_on)
         self.set_lamp("LOW INVENTORY", s.M < self.c.invLow)

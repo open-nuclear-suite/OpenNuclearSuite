@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import unittest
+from collections import deque
 
-from thermal_hydraulics_simulator import Constants, LWRTeachingSimulator, State
+from thermal_hydraulics_simulator import (
+    BANNER_LOGO_FILENAME,
+    SPLASH_LOGO_FILENAME,
+    Constants,
+    LWRTeachingSimulator,
+    State,
+    find_logo_path,
+)
 
 
 class FakeVar:
@@ -35,6 +43,10 @@ def make_model(**overrides: float) -> LWRTeachingSimulator:
     model.auto_eccs_var = FakeVar(True)
     model.set_slider = lambda key, value: model.control_vars[key].set(value)
     model.append_history = lambda *_args: None
+    model.events = deque(maxlen=250)
+    model.event_snapshot = {}
+    model.last_event_time = {}
+    model.reset_event_timeline()
     return model
 
 
@@ -44,6 +56,14 @@ def advance(model: LWRTeachingSimulator, seconds: float, dt: float = 0.05) -> No
 
 
 class ThermalHydraulicsPhysicsTests(unittest.TestCase):
+    def test_nested_app_directory_resolves_both_branding_images(self) -> None:
+        splash = find_logo_path(SPLASH_LOGO_FILENAME)
+        banner = find_logo_path(BANNER_LOGO_FILENAME)
+        self.assertIsNotNone(splash)
+        self.assertIsNotNone(banner)
+        self.assertTrue(splash.is_file())
+        self.assertTrue(banner.is_file())
+
     def test_nominal_state_remains_at_equilibrium(self) -> None:
         model = make_model()
         advance(model, 100.0)
@@ -85,6 +105,21 @@ class ThermalHydraulicsPhysicsTests(unittest.TestCase):
         advance(model, 120.0)
         self.assertGreater(model.state.chf_ratio, 1.0)
         self.assertIn(model.state.boiling_regime, {"transition boiling", "film boiling"})
+
+    def test_timeline_records_transitions_without_stepwise_duplicates(self) -> None:
+        model = make_model(pump=0.0)
+        advance(model, 120.0)
+        messages = [event.message for event in model.events]
+        self.assertIn("Reactor trip actuated", messages)
+        self.assertIn("Critical heat flux exceeded", messages)
+        self.assertEqual(messages.count("Reactor trip actuated"), 1)
+        self.assertEqual(messages.count("Critical heat flux exceeded"), 1)
+
+    def test_timeline_records_scenario_selection_immediately(self) -> None:
+        model = make_model()
+        model.set_scenario("Small-break LOCA")
+        self.assertEqual(model.events[-1].category, "SCENARIO")
+        self.assertEqual(model.events[-1].message, "Selected Small-break LOCA")
 
 
 if __name__ == "__main__":
