@@ -10,6 +10,8 @@ Run from this directory with:
 python main.py
 ```
 
+For step-by-step operating instructions, see [USER_MANUAL.md](USER_MANUAL.md).
+
 ## Main capabilities
 
 - Editable rounded 11 x 11 core with conventional and thorium-bearing assembly types
