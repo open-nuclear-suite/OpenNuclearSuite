@@ -22,7 +22,7 @@ This version combines:
     - CSV export for student post-run analysis.
 
 Run from the repository root with:
-    python simulators/reactor_teaching_simulator.py
+    python simulators/ReactorPhysicsSimulator/main.py
 
 Dependencies:
     pip install numpy matplotlib
@@ -38,6 +38,7 @@ Important:
 
 import csv
 import math
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -65,6 +66,96 @@ SPLASH_LOGO_FILENAME = "UTM.logo.png"
 BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 
+KINETICS_PRESETS = {
+    "Classroom": 0.080,
+    "Intermediate": 0.020,
+    "Advanced": 0.005,
+}
+
+XENON_PRESETS = {
+    # Multipliers are relative to the existing 60 s iodine / 90 s xenon demo.
+    "Laboratory demo": 1.0,
+    "Extended exercise": 5.0,
+    "Reference trend": 360.0,
+}
+
+PHYSICS_PROFILES = (
+    "Classroom model",
+    "Advanced core physics",
+)
+
+INITIAL_CONDITIONS = (
+    "Full-power equilibrium",
+    "Subcritical startup",
+)
+
+CYCLE_PRESETS = {
+    "Steady classroom": (0.0, 0.0, 0.0),
+    "Beginning of cycle": (0.0, 420.0, 1000.0),
+    "Middle of cycle": (210.0, 420.0, 500.0),
+    "End of cycle": (420.0, 420.0, 0.0),
+}
+
+
+def kinetics_preset_label(name):
+    return f"{name} (Lambda = {KINETICS_PRESETS[name]:.3f} s)"
+
+
+def xenon_preset_label(name):
+    multiplier = XENON_PRESETS[name]
+    iodine_half_time = 60.0 * multiplier
+    xenon_half_time = 90.0 * multiplier
+    return f"{name} (I-135 = {iodine_half_time:g} s, Xe-135 = {xenon_half_time:g} s)"
+
+
+@dataclass(frozen=True)
+class PedagogicalSettings:
+    kinetics_preset: str = "Classroom"
+    xenon_preset: str = "Laboratory demo"
+    load_follow_period_s: float = 220.0
+    physics_profile: str = "Classroom model"
+    initial_condition: str = "Full-power equilibrium"
+    cycle_preset: str = "Steady classroom"
+
+    def __post_init__(self):
+        if self.kinetics_preset not in KINETICS_PRESETS:
+            raise ValueError(f"Unknown kinetics preset: {self.kinetics_preset}")
+        if self.xenon_preset not in XENON_PRESETS:
+            raise ValueError(f"Unknown xenon preset: {self.xenon_preset}")
+        if not 60.0 <= self.load_follow_period_s <= 600.0:
+            raise ValueError("Load-follow period must be between 60 and 600 s")
+        if self.physics_profile not in PHYSICS_PROFILES:
+            raise ValueError(f"Unknown physics profile: {self.physics_profile}")
+        if self.initial_condition not in INITIAL_CONDITIONS:
+            raise ValueError(f"Unknown initial condition: {self.initial_condition}")
+        if self.cycle_preset not in CYCLE_PRESETS:
+            raise ValueError(f"Unknown cycle preset: {self.cycle_preset}")
+        if self.physics_profile == "Classroom model" and (
+            self.initial_condition != "Full-power equilibrium" or self.cycle_preset != "Steady classroom"
+        ):
+            raise ValueError("Startup and cycle presets require the Advanced core physics profile")
+
+    @property
+    def prompt_generation_time_s(self):
+        return KINETICS_PRESETS[self.kinetics_preset]
+
+    @property
+    def xenon_time_multiplier(self):
+        return XENON_PRESETS[self.xenon_preset]
+
+    @property
+    def advanced_physics(self):
+        return self.physics_profile == "Advanced core physics"
+
+    @property
+    def subcritical_startup(self):
+        return self.initial_condition == "Subcritical startup"
+
+    @property
+    def is_baseline(self):
+        return self == PedagogicalSettings()
+
+
 def find_logo_path(filename):
     """Return the first available branding image with the requested filename.
 
@@ -75,6 +166,8 @@ def find_logo_path(filename):
         Path(__file__).resolve().parent / filename,
         Path(__file__).resolve().parent.parent / filename,
         Path(__file__).resolve().parent.parent / "assets" / filename,
+        Path(__file__).resolve().parents[2] / filename,
+        Path(__file__).resolve().parents[2] / "assets" / filename,
         Path.cwd() / filename,
         Path.cwd() / "assets" / filename,
     ]
@@ -210,6 +303,37 @@ def classify_criticality(reactivity_pcm):
     return "CRITICAL"
 
 
+def rod_reactivity(position_pct, advanced=False):
+    """Return rod reactivity for a withdrawn-position percentage."""
+    position_pct = clamp(float(position_pct), 0.0, 100.0)
+    if not advanced:
+        return 1.0e-4 * (position_pct - 50.0)
+    fraction = position_pct / 100.0
+    integral_fraction = 3.0 * fraction**2 - 2.0 * fraction**3
+    return 0.010 * (integral_fraction - 0.5)
+
+
+def differential_rod_worth_pcm_per_pct(position_pct, advanced=False):
+    """Return the local slope of the selected integral rod-worth curve."""
+    if not advanced:
+        return 10.0
+    fraction = clamp(float(position_pct) / 100.0, 0.0, 1.0)
+    return 1.0e5 * 0.010 * (6.0 * fraction - 6.0 * fraction**2) / 100.0
+
+
+def rod_position_for_reactivity(target_rho, advanced=False):
+    """Invert the monotonic rod-worth curve with a bounded bisection."""
+    target_rho = clamp(float(target_rho), rod_reactivity(0.0, advanced), rod_reactivity(100.0, advanced))
+    low, high = 0.0, 100.0
+    for _ in range(50):
+        middle = 0.5 * (low + high)
+        if rod_reactivity(middle, advanced) < target_rho:
+            low = middle
+        else:
+            high = middle
+    return 0.5 * (low + high)
+
+
 FAULT_KEYS = [
     "fault_stuck_rod",
     "fault_partial_scram",
@@ -228,6 +352,14 @@ EXPORT_COLUMNS = [
     "mode",
     "running",
     "scram_active",
+    "kinetics_preset",
+    "prompt_generation_time_s",
+    "xenon_preset",
+    "xenon_time_multiplier",
+    "load_follow_period_s",
+    "physics_profile",
+    "initial_condition",
+    "cycle_preset",
     "true_power_pct",
     "measured_power_pct",
     "total_heat_pct",
@@ -237,13 +369,27 @@ EXPORT_COLUMNS = [
     "rho_rod_pcm",
     "rho_manual_pcm",
     "rho_temp_pcm",
+    "rho_fuel_pcm",
+    "rho_moderator_temp_pcm",
+    "rho_density_pcm",
+    "rho_void_pcm",
     "rho_boron_pcm",
     "rho_xenon_pcm",
+    "rho_samarium_pcm",
+    "rho_depletion_pcm",
     "period_s",
     "rod_position_pct",
     "boron_ppm",
     "iodine_index",
     "xenon_index",
+    "promethium_index",
+    "samarium_index",
+    "moderator_density_relative",
+    "void_fraction",
+    "source_strength",
+    "instrument_range",
+    "log_neutron_level",
+    "exposure_efpd",
     "fuel_temp_C",
     "clad_temp_C",
     "coolant_temp_C",
@@ -266,7 +412,8 @@ EXPORT_COLUMNS = [
 # ============================================================
 
 class ReactorState:
-    def __init__(self):
+    def __init__(self, pedagogical_settings=None):
+        self.pedagogical_settings = pedagogical_settings or PedagogicalSettings()
         # Simulation clock
         self.dt = 0.02
         self.time = 0.0
@@ -280,11 +427,12 @@ class ReactorState:
         self.beta = float(np.sum(self.beta_i))
 
         # Effective prompt generation time is slowed for classroom visualization.
-        self.Lambda = 0.080
-        self.source = 1.0e-6
+        self.Lambda = self.pedagogical_settings.prompt_generation_time_s
+        self.source = 1.0e-5 if self.pedagogical_settings.subcritical_startup else 1.0e-6
+        self.source_strength = self.source
 
         # Nominal operating point.
-        self.P = 1.00                       # true neutron power, fraction of full power
+        self.P = 1.0e-6 if self.pedagogical_settings.subcritical_startup else 1.00
         self.measuredPower = self.P
         self.measuredPct = 100.0 * self.P
         self.powerPct = 100.0 * self.P
@@ -300,28 +448,56 @@ class ReactorState:
         self.Qheat = self.prompt_frac * self.P + self.Qdecay
 
         # Iodine/xenon model. Time constants are intentionally accelerated.
-        self.lambdaI = math.log(2) / 60.0
-        self.lambdaXe = math.log(2) / 90.0
+        xenon_multiplier = self.pedagogical_settings.xenon_time_multiplier
+        self.lambdaI = math.log(2) / (60.0 * xenon_multiplier)
+        self.lambdaXe = math.log(2) / (90.0 * xenon_multiplier)
         self.xeBurn = 0.020
+        self.iodineYield = self.lambdaI
         self.xeDirectYield = 0.00035
         self.xeWorth = 0.0040
         self.I = self.P
         self.Xe = (self.xeDirectYield * self.P + self.lambdaI * self.I) / (self.lambdaXe + self.xeBurn * self.P)
 
+        # Optional advanced Pm-149/Sm-149 poisoning, normalized for teaching.
+        self.lambdaPm = math.log(2) / (150.0 * xenon_multiplier)
+        self.pmYield = 0.0040
+        self.smBurn = 0.0080
+        self.smWorth = 0.0020
+        self.Pm = self.pmYield * self.P / self.lambdaPm
+        self.Sm = self.pmYield / self.smBurn if self.P > 1.0e-4 else 0.0
+        if self.pedagogical_settings.subcritical_startup:
+            self.I = self.Xe = self.Pm = self.Sm = 0.0
+
+        # Simplified teaching-cycle state. One simulated second represents one
+        # EFPD only in the explicitly selected advanced cycle demonstrations.
+        exposure, cycle_length, initial_boron = CYCLE_PRESETS[self.pedagogical_settings.cycle_preset]
+        self.exposure_efpd = exposure
+        self.cycle_length_efpd = cycle_length
+        self.exposure_rate_efpd_per_s = 1.0 if cycle_length > 0.0 else 0.0
+        self.rho_depletion = 0.0030 * max(0.0, 1.0 - exposure / cycle_length) if cycle_length else 0.0
+
         # Operator controls and reactivity worths.
-        self.rod_pos = 50.0 + (self.xeWorth * self.Xe) / 1.0e-4  # near critical at initial Xe
-        self.rod_pos = clamp(self.rod_pos, 0.0, 100.0)
+        advanced = self.pedagogical_settings.advanced_physics
+        initial_poison_rho = -self.xeWorth * self.Xe - (self.smWorth * self.Sm if advanced else 0.0)
+        initial_boron_rho = -3.0e-6 * initial_boron
+        target_rod_rho = -(initial_poison_rho + initial_boron_rho + (self.rho_depletion if advanced else 0.0))
+        self.rod_pos = 25.0 if self.pedagogical_settings.subcritical_startup else rod_position_for_reactivity(target_rod_rho, advanced)
         self.rho_manual = 0.0
-        self.boron_ppm = 0.0
+        self.boron_ppm = initial_boron if advanced else 0.0
         self.boron_coeff = 3.0e-6
         self.autoRodGain = 8.0                 # % rod per second per unit power error
-        self.loadFollowPeriod = 220.0
+        self.loadFollowPeriod = self.pedagogical_settings.load_follow_period_s
 
         # Reactivity terms.
         self.rho_rods = 0.0
         self.rho_temp = 0.0
+        self.rho_fuel = 0.0
+        self.rho_moderator_temp = 0.0
+        self.rho_density = 0.0
+        self.rho_void = 0.0
         self.rho_boron = 0.0
         self.rho_xe = 0.0
+        self.rho_sm = 0.0
         self.rho_total = 0.0
         self.reactivity_pcm = 0.0
 
@@ -329,19 +505,28 @@ class ReactorState:
         self.coolantFlow = 100.0
         self.heatSink = 100.0
         self.inletT = 285.0
-        self.fuelT = 565.0
-        self.cladT = 425.0
+        self.fuelT = 345.0 if self.pedagogical_settings.subcritical_startup else 565.0
+        self.cladT = 345.0 if self.pedagogical_settings.subcritical_startup else 425.0
         self.coolT = 345.0
         self.Tf_ref = self.fuelT
         self.Tc_ref = self.coolT
         self.alpha_f = -3.0e-6
         self.alpha_c = -1.5e-6
+        self.alpha_density = -8.0e-4
+        self.alpha_void = -0.012
+        self.moderator_density = 1.0
+        self.void_fraction = 0.0
         self.tauF = 8.0
         self.tauCl = 5.0
         self.tauC = 18.0
 
         # Delayed neutron precursors initialized at equilibrium.
         self.C = (self.beta_i / (self.Lambda * self.lambda_i)) * self.P
+
+        # Instrument range is derived from true power; it never feeds kinetics.
+        self.instrument_range = "POWER RANGE"
+        self.log_neutron_level = math.log10(max(self.P, 1.0e-12))
+        self.subcritical_multiplication = 1.0
 
         # Instrumentation noise.
         self.noiseAmp = 1.0                    # percent-like slider scale
@@ -405,12 +590,29 @@ class ReactorState:
         self.push_history()
 
     def update_reactivity_terms(self):
-        # Rod worth: 50% withdrawn is approximately zero cold rod reactivity.
-        self.rho_rods = 1.0e-4 * (self.rod_pos - 50.0)
-        self.rho_temp = self.alpha_f * (self.fuelT - self.Tf_ref) + self.alpha_c * (self.coolT - self.Tc_ref)
+        advanced = self.pedagogical_settings.advanced_physics
+        self.rho_rods = rod_reactivity(self.rod_pos, advanced)
+        self.rho_fuel = self.alpha_f * (self.fuelT - self.Tf_ref)
+        self.rho_moderator_temp = self.alpha_c * (self.coolT - self.Tc_ref)
+        if advanced:
+            self.moderator_density = clamp(1.0 - 0.0015 * (self.coolT - self.Tc_ref), 0.70, 1.05)
+            self.void_fraction = clamp((self.coolT - 390.0) / 80.0, 0.0, 0.25)
+            self.rho_density = self.alpha_density * (1.0 - self.moderator_density)
+            self.rho_void = self.alpha_void * self.void_fraction
+        else:
+            self.moderator_density = 1.0
+            self.void_fraction = 0.0
+            self.rho_density = 0.0
+            self.rho_void = 0.0
+        self.rho_temp = self.rho_fuel + self.rho_moderator_temp + self.rho_density + self.rho_void
         self.rho_boron = -self.boron_coeff * self.boron_ppm
         self.rho_xe = -self.xeWorth * self.Xe
-        self.rho_total = self.rho_rods + self.rho_manual + self.rho_temp + self.rho_boron + self.rho_xe
+        self.rho_sm = -self.smWorth * self.Sm if advanced else 0.0
+        depletion = self.rho_depletion if advanced else 0.0
+        self.rho_total = (
+            self.rho_rods + self.rho_manual + self.rho_temp + self.rho_boron
+            + self.rho_xe + self.rho_sm + depletion
+        )
         self.rho_total = clamp(self.rho_total, -0.0250, 0.95 * self.beta)
 
     def update_derived(self):
@@ -420,6 +622,18 @@ class ReactorState:
         self.decayPct = 100.0 * self.Qdecay
         self.targetPct = 100.0 * self.setpoint
         self.reactivity_pcm = 1.0e5 * self.rho_total
+        self.log_neutron_level = math.log10(max(self.P, 1.0e-12))
+        if self.P < 1.0e-4:
+            self.instrument_range = "SOURCE RANGE"
+        elif self.P < 0.10:
+            self.instrument_range = "INTERMEDIATE RANGE"
+        else:
+            self.instrument_range = "POWER RANGE"
+        if self.rho_total < -1.0e-8:
+            equilibrium_without_multiplication = max(self.source_strength, 1.0e-12)
+            self.subcritical_multiplication = max(1.0, self.P / equilibrium_without_multiplication)
+        else:
+            self.subcritical_multiplication = math.inf
         self.clockString = f"{self.time:06.1f} s"
 
     def push_history(self):
@@ -450,6 +664,14 @@ class ReactorState:
             "mode": self.mode,
             "running": int(self.running),
             "scram_active": int(self.scram),
+            "kinetics_preset": self.pedagogical_settings.kinetics_preset,
+            "prompt_generation_time_s": self.Lambda,
+            "xenon_preset": self.pedagogical_settings.xenon_preset,
+            "xenon_time_multiplier": self.pedagogical_settings.xenon_time_multiplier,
+            "load_follow_period_s": self.loadFollowPeriod,
+            "physics_profile": self.pedagogical_settings.physics_profile,
+            "initial_condition": self.pedagogical_settings.initial_condition,
+            "cycle_preset": self.pedagogical_settings.cycle_preset,
             "true_power_pct": self.powerPct,
             "measured_power_pct": self.measuredPct,
             "total_heat_pct": self.heatPct,
@@ -459,13 +681,27 @@ class ReactorState:
             "rho_rod_pcm": 1.0e5 * self.rho_rods,
             "rho_manual_pcm": 1.0e5 * self.rho_manual,
             "rho_temp_pcm": 1.0e5 * self.rho_temp,
+            "rho_fuel_pcm": 1.0e5 * self.rho_fuel,
+            "rho_moderator_temp_pcm": 1.0e5 * self.rho_moderator_temp,
+            "rho_density_pcm": 1.0e5 * self.rho_density,
+            "rho_void_pcm": 1.0e5 * self.rho_void,
             "rho_boron_pcm": 1.0e5 * self.rho_boron,
             "rho_xenon_pcm": 1.0e5 * self.rho_xe,
+            "rho_samarium_pcm": 1.0e5 * self.rho_sm,
+            "rho_depletion_pcm": 1.0e5 * (self.rho_depletion if self.pedagogical_settings.advanced_physics else 0.0),
             "period_s": "stable" if (math.isinf(self.period) or math.isnan(self.period)) else self.period,
             "rod_position_pct": self.rod_pos,
             "boron_ppm": self.boron_ppm,
             "iodine_index": self.I,
             "xenon_index": self.Xe,
+            "promethium_index": self.Pm,
+            "samarium_index": self.Sm,
+            "moderator_density_relative": self.moderator_density,
+            "void_fraction": self.void_fraction,
+            "source_strength": self.source_strength,
+            "instrument_range": self.instrument_range,
+            "log_neutron_level": self.log_neutron_level,
+            "exposure_efpd": self.exposure_efpd,
             "fuel_temp_C": self.fuelT,
             "clad_temp_C": self.cladT,
             "coolant_temp_C": self.coolT,
@@ -520,8 +756,9 @@ class ReactorModel:
     def __init__(self):
         self.s = ReactorState()
 
-    def reset(self):
-        self.s = ReactorState()
+    def reset(self, pedagogical_settings=None):
+        settings = pedagogical_settings or self.s.pedagogical_settings
+        self.s = ReactorState(settings)
 
     def export_csv(self, filepath):
         # Make sure the most recent displayed state is represented, even if the
@@ -545,6 +782,15 @@ class ReactorModel:
             p_old = s.P
 
             sev = s.fault_fraction()
+
+            if s.pedagogical_settings.advanced_physics and s.cycle_length_efpd > 0.0:
+                s.exposure_efpd = min(
+                    s.cycle_length_efpd,
+                    s.exposure_efpd + s.P * s.exposure_rate_efpd_per_s * s.dt,
+                )
+                s.rho_depletion = 0.0030 * max(
+                    0.0, 1.0 - s.exposure_efpd / s.cycle_length_efpd,
+                )
 
             # Load-follow demonstration changes demanded power slowly.
             if s.mode == "load_follow" and not s.scram:
@@ -602,7 +848,7 @@ class ReactorModel:
 
             C_old = s.C.copy()
             delayed_source = float(np.sum(s.lambda_i * C_old))
-            dPdt = ((s.rho_total - s.beta) / s.Lambda) * s.P + delayed_source + s.source
+            dPdt = ((s.rho_total - s.beta) / s.Lambda) * s.P + delayed_source + s.source_strength
             dCdt = (s.beta_i / s.Lambda) * s.P - s.lambda_i * C_old
 
             s.P = clamp(s.P + dPdt * s.dt, 1.0e-8, 3.0)
@@ -615,7 +861,7 @@ class ReactorModel:
             s.Qheat = s.prompt_frac * s.P + s.Qdecay
 
             # Iodine/xenon poisoning.
-            dI = s.lambdaI * s.P - s.lambdaI * s.I
+            dI = s.iodineYield * s.P - s.lambdaI * s.I
             dXe = (
                 s.xeDirectYield * s.P
                 + s.lambdaI * s.I
@@ -624,6 +870,11 @@ class ReactorModel:
             )
             s.I = max(s.I + dI * s.dt, 0.0)
             s.Xe = max(s.Xe + dXe * s.dt, 0.0)
+            if s.pedagogical_settings.advanced_physics:
+                dPm = s.pmYield * s.P - s.lambdaPm * s.Pm
+                dSm = s.lambdaPm * s.Pm - s.smBurn * s.P * s.Sm
+                s.Pm = max(s.Pm + dPm * s.dt, 0.0)
+                s.Sm = max(s.Sm + dSm * s.dt, 0.0)
 
             # Three-node thermal model. Flow removes heat; heat sink/load represents
             # secondary-side heat rejection or turbine/steam-generator load.
@@ -643,7 +894,11 @@ class ReactorModel:
             phi = math.exp(-s.dt / max(0.2, s.noiseTau))
             sigma = 0.01 * s.noiseAmp
             s.noiseState = phi * s.noiseState + math.sqrt(max(0.0, 1.0 - phi**2)) * sigma * np.random.randn()
-            indicated_power = max(0.0, s.P * (1.0 + s.noiseState) + 0.0005 * np.random.randn())
+            if s.pedagogical_settings.advanced_physics:
+                detector_noise = max(s.P * 0.002, 1.0e-10) * np.random.randn()
+            else:
+                detector_noise = 0.0005 * np.random.randn()
+            indicated_power = max(0.0, s.P * (1.0 + s.noiseState) + detector_noise)
 
             # Instrumentation faults: detector bias reads high; frozen signal
             # holds the value latched when the fault was switched on.
@@ -692,6 +947,7 @@ class ReactorModel:
         active_faults = s.active_fault_labels()
         fault_line = "None" if not active_faults else ", ".join(active_faults)
         out = [
+            f"Physics: {s.pedagogical_settings.physics_profile}  |  Initial: {s.pedagogical_settings.initial_condition}",
             f"Mode: {s.mode.upper().replace('_', '-')}       Period: {fmt_period(s.period)}",
             f"Criticality: {classify_criticality(s.reactivity_pcm):<13}  |  Reactivity: {s.reactivity_pcm:+7.1f} pcm",
             f"Active faults: {fault_line}  |  Fault severity: {s.fault_severity:4.0f}%",
@@ -707,6 +963,7 @@ class ReactorModel:
             f"Fuel / clad / coolant temp:     {s.fuelT:7.1f} / {s.cladT:7.1f} / {s.coolT:7.1f} C",
             f"Coolant flow / heat sink:       {s.coolantFlow:7.1f} / {s.heatSink:7.1f} %",
             f"Iodine / Xenon index:           {s.I:7.3f} / {s.Xe:7.3f}",
+            f"Promethium / Samarium index:    {s.Pm:7.3f} / {s.Sm:7.3f}",
             f"C1..C6: {cstr}",
             "---- Event Log ----",
         ]
@@ -1203,6 +1460,9 @@ class ReactorTeachingSimulatorTk:
 
         self.model = ReactorModel()
         self.syncing_controls = False
+        self.diagnostics_window = None
+        self.diagnostic_vars = {}
+        self.syncing_diagnostics = False
 
         self.colors = {
             "bg": "#0f1115",
@@ -1278,7 +1538,7 @@ class ReactorTeachingSimulatorTk:
 
         pane_font = ("Segoe UI", 11, "bold")
         self.left_pane = ScrollablePane(
-            self.root, " Operator Controls ", 400, 860,
+            self.root, " Operator Controls ", 400, 950,
             self.colors["panel"], self.colors["text"], pane_font,
         )
         self.right_pane = ScrollablePane(
@@ -1314,11 +1574,25 @@ class ReactorTeachingSimulatorTk:
 
         self.clock_var = tk.StringVar(value="TIME 0000.0 s")
         self.status_var = tk.StringVar(value="STATUS: READY")
+        self.scaling_var = tk.StringVar(value="")
 
         tk.Label(self.left, textvariable=self.clock_var, bg=self.colors["lcd_bg"], fg=self.colors["lcd"],
                  font=("Courier New", 12, "bold")).place(x=20, y=70, width=160, height=30)
         tk.Label(self.left, textvariable=self.status_var, bg="#0c1018", fg="#f6f0cc",
                  font=("Courier New", 11, "bold")).place(x=200, y=70, width=160, height=30)
+
+        tk.Label(
+            self.left, textvariable=self.scaling_var, bg="#5b3900", fg="#fff0b3",
+            font=("Segoe UI", 8, "bold"), anchor="center", wraplength=330,
+        ).place(x=20, y=830, width=340, height=42)
+        tk.Button(
+            self.left, text="INSTRUCTOR: PEDAGOGICAL SETTINGS", bg="#604878", fg="white",
+            font=("Segoe UI", 9, "bold"), command=self.open_pedagogical_settings,
+        ).place(x=20, y=790, width=340, height=32)
+        tk.Button(
+            self.left, text="OPEN CORE PHYSICS DIAGNOSTICS", bg="#315b67", fg="white",
+            font=("Segoe UI", 9, "bold"), command=self.open_physics_diagnostics,
+        ).place(x=20, y=882, width=340, height=32)
 
         tk.Label(self.left, text="Control Mode", bg=self.colors["panel"], fg=self.colors["text"],
                  font=("Segoe UI", 10, "bold"), anchor="w").place(x=20, y=112, width=150, height=24)
@@ -1492,6 +1766,285 @@ class ReactorTeachingSimulatorTk:
         self.model.reset()
         self.sync_controls_from_model()
         self.refresh_all()
+
+    def open_pedagogical_settings(self):
+        if self.model.s.running:
+            messagebox.showwarning(
+                "Pause required",
+                "Pause the simulator before changing pedagogical model settings.",
+            )
+            return
+
+        current = self.model.s.pedagogical_settings
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Instructor - Pedagogical Settings")
+        dialog.geometry("680x500")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(
+            frame,
+            text="These controls alter the model equations, not wall-clock simulation speed.",
+            wraplength=620,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 15))
+
+        kinetics_labels = {kinetics_preset_label(name): name for name in KINETICS_PRESETS}
+        xenon_labels = {xenon_preset_label(name): name for name in XENON_PRESETS}
+        kinetics_var = tk.StringVar(value=kinetics_preset_label(current.kinetics_preset))
+        xenon_var = tk.StringVar(value=xenon_preset_label(current.xenon_preset))
+        load_var = tk.DoubleVar(value=current.load_follow_period_s)
+        profile_var = tk.StringVar(value=current.physics_profile)
+        initial_var = tk.StringVar(value=current.initial_condition)
+        cycle_var = tk.StringVar(value=current.cycle_preset)
+
+        ttk.Label(frame, text="Kinetics preset").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Combobox(
+            frame, textvariable=kinetics_var, values=list(kinetics_labels), state="readonly", width=55,
+        ).grid(row=1, column=1, sticky="ew", pady=6)
+        ttk.Label(frame, text="Xenon timescale").grid(row=2, column=0, sticky="w", pady=6)
+        ttk.Combobox(
+            frame, textvariable=xenon_var, values=list(xenon_labels), state="readonly", width=55,
+        ).grid(row=2, column=1, sticky="ew", pady=6)
+        ttk.Label(frame, text="Load-follow period (s)").grid(row=3, column=0, sticky="w", pady=6)
+        tk.Scale(
+            frame, variable=load_var, from_=60, to=600, resolution=10, orient="horizontal", length=245,
+        ).grid(row=3, column=1, sticky="ew", pady=6)
+
+        ttk.Separator(frame, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Label(frame, text="Core-physics detail").grid(row=5, column=0, sticky="w", pady=6)
+        profile_box = ttk.Combobox(
+            frame, textvariable=profile_var, values=PHYSICS_PROFILES, state="readonly", width=55,
+        )
+        profile_box.grid(row=5, column=1, sticky="ew", pady=6)
+        ttk.Label(frame, text="Initial condition").grid(row=6, column=0, sticky="w", pady=6)
+        initial_box = ttk.Combobox(
+            frame, textvariable=initial_var, values=INITIAL_CONDITIONS, state="readonly", width=55,
+        )
+        initial_box.grid(row=6, column=1, sticky="ew", pady=6)
+        ttk.Label(frame, text="Exposure state").grid(row=7, column=0, sticky="w", pady=6)
+        cycle_box = ttk.Combobox(
+            frame, textvariable=cycle_var, values=list(CYCLE_PRESETS), state="readonly", width=55,
+        )
+        cycle_box.grid(row=7, column=1, sticky="ew", pady=6)
+
+        def update_advanced_controls(_event=None):
+            advanced = profile_var.get() == "Advanced core physics"
+            if not advanced:
+                initial_var.set("Full-power equilibrium")
+                cycle_var.set("Steady classroom")
+            initial_box.configure(state="readonly" if advanced else "disabled")
+            cycle_box.configure(state="readonly" if advanced else "disabled")
+
+        profile_box.bind("<<ComboboxSelected>>", update_advanced_controls)
+        update_advanced_controls()
+
+        note = ttk.Label(
+            frame,
+            text="Applying settings resets the run and initializes delayed-neutron and Xe/I state consistently.",
+            wraplength=620,
+        )
+        note.grid(row=8, column=0, columnspan=2, sticky="w", pady=(12, 15))
+
+        def apply_settings():
+            settings = PedagogicalSettings(
+                kinetics_preset=kinetics_labels[kinetics_var.get()],
+                xenon_preset=xenon_labels[xenon_var.get()],
+                load_follow_period_s=float(load_var.get()),
+                physics_profile=profile_var.get(),
+                initial_condition=initial_var.get(),
+                cycle_preset=cycle_var.get(),
+            )
+            self.model.reset(settings)
+            self.model.s.add_log("Pedagogical settings applied; simulation reset.")
+            dialog.destroy()
+            self.sync_controls_from_model()
+            self.refresh_all()
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=9, column=0, columnspan=2, sticky="e")
+        ttk.Button(
+            buttons, text="Restore validated defaults",
+            command=lambda: (
+                kinetics_var.set(kinetics_preset_label("Classroom")),
+                xenon_var.set(xenon_preset_label("Laboratory demo")),
+                load_var.set(220),
+                profile_var.set("Classroom model"),
+                initial_var.set("Full-power equilibrium"),
+                cycle_var.set("Steady classroom"),
+                update_advanced_controls(),
+            ),
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Apply and reset", command=apply_settings).pack(side="left")
+
+    def open_physics_diagnostics(self):
+        if self.diagnostics_window is not None and self.diagnostics_window.winfo_exists():
+            self.diagnostics_window.lift()
+            self.diagnostics_window.focus_force()
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("Core Physics Diagnostics")
+        window.geometry("780x620")
+        window.minsize(700, 560)
+        window.transient(self.root)
+        self.diagnostics_window = window
+        self.diagnostic_vars = {
+            key: tk.StringVar(value="")
+            for key in ("profile", "reactivity", "poisons", "startup", "cycle", "source")
+        }
+
+        def close_window():
+            self.diagnostics_window = None
+            self.diagnostic_vars = {}
+            window.destroy()
+
+        window.protocol("WM_DELETE_WINDOW", close_window)
+        ttk.Label(
+            window, textvariable=self.diagnostic_vars["profile"],
+            font=("Segoe UI", 11, "bold"), padding=(12, 10),
+        ).pack(fill="x")
+        notebook = ttk.Notebook(window)
+        notebook.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        for title, key in (
+            ("Reactivity balance", "reactivity"),
+            ("Poisons and exposure", "poisons"),
+            ("Startup instrumentation", "startup"),
+        ):
+            tab = ttk.Frame(notebook, padding=18)
+            notebook.add(tab, text=title)
+            ttk.Label(
+                tab, textvariable=self.diagnostic_vars[key],
+                font=("Courier New", 10), justify="left",
+            ).pack(anchor="nw", fill="x")
+            if key == "reactivity":
+                self.rod_worth_figure = Figure(figsize=(6.8, 2.0), dpi=90, facecolor="#f3f3f3")
+                self.rod_worth_axis = self.rod_worth_figure.add_subplot(111)
+                self.rod_diff_axis = self.rod_worth_axis.twinx()
+                self.rod_worth_canvas = FigureCanvasTkAgg(self.rod_worth_figure, master=tab)
+                self.rod_worth_canvas.get_tk_widget().pack(fill="both", expand=True, pady=(10, 0))
+            if key == "poisons":
+                ttk.Separator(tab).pack(fill="x", pady=14)
+                ttk.Label(
+                    tab, textvariable=self.diagnostic_vars["cycle"],
+                    font=("Courier New", 10), justify="left",
+                ).pack(anchor="nw", fill="x")
+            if key == "startup":
+                ttk.Separator(tab).pack(fill="x", pady=14)
+                ttk.Label(tab, text="External source strength (log10 model units)").pack(anchor="w")
+                source_scale = tk.Scale(
+                    tab, from_=-8, to=-3, resolution=0.1, orient="horizontal", length=500,
+                )
+                source_scale.set(math.log10(max(self.model.s.source_strength, 1.0e-8)))
+                source_scale.configure(command=self.source_strength_cb)
+                source_scale.pack(anchor="w")
+                self.source_strength_scale = source_scale
+                ttk.Label(tab, textvariable=self.diagnostic_vars["source"]).pack(anchor="w")
+
+        self.refresh_diagnostics()
+
+    def source_strength_cb(self, value):
+        if self.syncing_diagnostics or not self.model.s.pedagogical_settings.advanced_physics:
+            return
+        self.model.s.source_strength = 10.0 ** float(value)
+        self.model.s.add_log(f"External source set to {self.model.s.source_strength:.2e} model units.")
+        self.refresh_all()
+
+    def refresh_diagnostics(self):
+        if self.diagnostics_window is None or not self.diagnostics_window.winfo_exists():
+            return
+        s = self.model.s
+        advanced = s.pedagogical_settings.advanced_physics
+        self.diagnostic_vars["profile"].set(
+            f"Active profile: {s.pedagogical_settings.physics_profile} | "
+            f"Initial condition: {s.pedagogical_settings.initial_condition}"
+        )
+        components = [
+            ("Rod bank", s.rho_rods), ("Manual trim", s.rho_manual),
+            ("Fuel Doppler", s.rho_fuel), ("Moderator temperature", s.rho_moderator_temp),
+            ("Moderator density", s.rho_density), ("Void", s.rho_void),
+            ("Boron", s.rho_boron), ("Xe-135", s.rho_xe),
+            ("Sm-149", s.rho_sm), ("Cycle depletion", s.rho_depletion if advanced else 0.0),
+        ]
+        balance = "\n".join(f"{name:<24} {1.0e5 * value:+9.1f} pcm" for name, value in components)
+        balance += (
+            f"\n{'-' * 38}\n{'TOTAL':<24} {s.reactivity_pcm:+9.1f} pcm"
+            f"\n\nRod position             {s.rod_pos:9.2f} % withdrawn"
+            f"\nDifferential rod worth   {differential_rod_worth_pcm_per_pct(s.rod_pos, advanced):9.2f} pcm/%"
+        )
+        self.diagnostic_vars["reactivity"].set(balance)
+        self.diagnostic_vars["poisons"].set(
+            f"I-135 index              {s.I:12.5f}\n"
+            f"Xe-135 index             {s.Xe:12.5f}   ({1.0e5*s.rho_xe:+.1f} pcm)\n"
+            f"Pm-149 index             {s.Pm:12.5f}\n"
+            f"Sm-149 index             {s.Sm:12.5f}   ({1.0e5*s.rho_sm:+.1f} pcm)\n\n"
+            f"Moderator density        {s.moderator_density:12.5f} relative\n"
+            f"Void fraction            {100.0*s.void_fraction:12.3f} %"
+        )
+        recommended_boron = 1000.0 * max(
+            0.0, 1.0 - s.exposure_efpd / s.cycle_length_efpd,
+        ) if s.cycle_length_efpd else 0.0
+        self.diagnostic_vars["cycle"].set(
+            f"Exposure preset           {s.pedagogical_settings.cycle_preset}\n"
+            f"Teaching exposure         {s.exposure_efpd:9.2f} / {s.cycle_length_efpd:.0f} EFPD\n"
+            f"Cycle excess reactivity   {1.0e5*s.rho_depletion:+9.1f} pcm\n"
+            f"Illustrative boron target {recommended_boron:9.0f} ppm\n"
+            f"Actual boron              {s.boron_ppm:9.0f} ppm"
+        )
+        multiplication = "infinite/critical" if math.isinf(s.subcritical_multiplication) else f"{s.subcritical_multiplication:.2f}"
+        self.diagnostic_vars["startup"].set(
+            f"Active detector range     {s.instrument_range}\n"
+            f"True neutron power        {s.P:12.5e} fraction\n"
+            f"Log neutron level         {s.log_neutron_level:12.3f} decades\n"
+            f"External source           {s.source_strength:12.5e} model units\n"
+            f"Subcritical multiplication {multiplication}\n\n"
+            "Range transitions: source < 1e-4, intermediate < 10%, power >= 10%."
+        )
+        self.diagnostic_vars["source"].set(
+            "Available only in Advanced core physics. "
+            f"Current source = {s.source_strength:.2e}."
+        )
+        if hasattr(self, "source_strength_scale"):
+            self.syncing_diagnostics = True
+            try:
+                self.source_strength_scale.configure(state="normal" if advanced else "disabled")
+                self.source_strength_scale.set(math.log10(max(s.source_strength, 1.0e-8)))
+            finally:
+                self.syncing_diagnostics = False
+        if hasattr(self, "rod_worth_axis"):
+            positions = np.linspace(0.0, 100.0, 101)
+            integral = np.array([1.0e5 * rod_reactivity(position, advanced) for position in positions])
+            differential = np.array([
+                differential_rod_worth_pcm_per_pct(position, advanced) for position in positions
+            ])
+            axis = self.rod_worth_axis
+            diff_axis = self.rod_diff_axis
+            axis.clear()
+            diff_axis.clear()
+            integral_line, = axis.plot(positions, integral, color="#315b67", label="Integral worth")
+            differential_line, = diff_axis.plot(
+                positions, differential, color="#a65f00", linestyle="--", label="Differential worth",
+            )
+            axis.axvline(s.rod_pos, color="#8b1e1e", linewidth=1.2, label="Current position")
+            axis.axhline(0.0, color="#777777", linewidth=0.7)
+            axis.set_xlim(0.0, 100.0)
+            axis.set_xlabel("Rod bank withdrawn (%)", fontsize=8)
+            axis.set_ylabel("Integral worth (pcm)", fontsize=8, color="#315b67")
+            diff_axis.set_ylabel("Differential worth (pcm/%)", fontsize=8, color="#a65f00")
+            axis.tick_params(labelsize=7)
+            diff_axis.tick_params(labelsize=7)
+            axis.grid(True, alpha=0.25)
+            axis.legend(
+                [integral_line, differential_line],
+                [integral_line.get_label(), differential_line.get_label()],
+                loc="upper left", fontsize=7, ncol=2,
+            )
+            self.rod_worth_figure.tight_layout(pad=0.8)
+            self.rod_worth_canvas.draw_idle()
 
     def manual_mode_cb(self):
         self.model.s.mode = "manual"
@@ -1695,6 +2248,14 @@ class ReactorTeachingSimulatorTk:
         s.update_derived()
 
         self.clock_var.set("TIME " + s.clockString)
+        settings = s.pedagogical_settings
+        if settings.is_baseline:
+            self.scaling_var.set("PEDAGOGICAL SCALING: VALIDATED CLASSROOM DEFAULTS")
+        else:
+            self.scaling_var.set(
+                f"MODEL SETTINGS ACTIVE - {settings.physics_profile}; Lambda={s.Lambda:.3f} s; "
+                f"Xe={settings.xenon_preset}; {settings.cycle_preset}"
+            )
         if s.scram:
             self.status_var.set("STATUS: SCRAM")
         elif s.running:
@@ -1720,6 +2281,7 @@ class ReactorTeachingSimulatorTk:
             self.readout.insert(tk.END, line)
         if self.readout.size() > 0:
             self.readout.see(tk.END)
+        self.refresh_diagnostics()
 
     def schedule_loop(self):
         if self.model.s.running:

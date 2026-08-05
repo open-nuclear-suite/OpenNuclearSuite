@@ -21,3 +21,9 @@ jobs:
 
       - name: Check simulator syntax
         run: python -m compileall -q simulators
+
+      - name: Install simulator dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Test reactor pedagogical settings
+        run: python -m unittest discover -s simulators/ReactorPhysicsSimulator -p "test_*.py" -v
