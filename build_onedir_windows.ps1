@@ -29,7 +29,8 @@ $commonArgs = @(
 
 & $python -m PyInstaller @commonArgs `
     --name "Reactor-Physics-and-Kinetics-Simulator" `
-    "$projectRoot\simulators\reactor_teaching_simulator.py"
+    --paths "$projectRoot\simulators\ReactorPhysicsSimulator" `
+    "$projectRoot\simulators\ReactorPhysicsSimulator\main.py"
 
 & $python -m PyInstaller @commonArgs `
     --name "Thermal-Hydraulics-and-LOCA-Simulator" `

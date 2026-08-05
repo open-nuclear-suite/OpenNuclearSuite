@@ -21,7 +21,14 @@ Do not use either simulator for:
 ## Technical limitations
 
 The applications use simplified, lumped-parameter representations and
-pedagogically adjusted constants and time scales. They do not reproduce the full
+pedagogically adjusted constants and time scales. The reactor simulator's
+instructor presets intentionally change selected prompt-kinetics, iodine/xenon,
+and load-follow timescales; the active configuration is part of the teaching
+model and does not represent a validated plant. Its advanced profile adds
+normalized Pm/Sm poisoning, a nonlinear rod-worth curve, source-range
+instrumentation, separated feedback terms, and teaching-scaled exposure. These
+remain lumped demonstrations rather than validated cross sections, spatial
+neutronics, depletion, detector response, or plant data. The applications do not reproduce the full
 geometry, spatial physics, multi-dimensional fluid behavior, detailed
 two-phase-flow regimes, component-specific performance, protection-system
 logic, uncertainty treatment, or validated plant data required for engineering
@@ -38,6 +45,8 @@ pump-performance curves.
 
 ## Classroom practice
 
-Instructors should identify the assumptions relevant to each exercise, compare
+Instructors should identify the assumptions relevant to each exercise, restore
+the declared classroom defaults when reproducible marking is required, record
+any non-default reactor pedagogical settings, compare
 trends with established course material, and explain where a production
 analysis code would require higher-fidelity models and validation.

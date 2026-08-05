@@ -9,6 +9,6 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-".venv\Scripts\python.exe" "simulators\reactor_teaching_simulator.py"
+".venv\Scripts\python.exe" "simulators\ReactorPhysicsSimulator\main.py"
 if errorlevel 1 pause
 endlocal

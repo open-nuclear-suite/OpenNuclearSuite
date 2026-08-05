@@ -19,4 +19,9 @@ These are simplified teaching models only. They are not suitable for reactor
 design, licensing, safety analysis, operator training, accident prediction,
 or real plant operation.
 
+The Reactor Physics and Kinetics Simulator uses validated classroom defaults
+at startup. Its instructor panel provides bounded alternative teaching
+timescales and an optional advanced core-physics profile, displays any active
+model settings, and records them in CSV exports.
+
 License and citation details are included alongside the applications.
