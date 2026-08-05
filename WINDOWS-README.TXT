@@ -1,10 +1,11 @@
 OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.0.0
 Windows standalone release
 
-This folder contains two independent Windows desktop applications:
+This folder contains three independent Windows desktop applications:
 
   Reactor-Physics-and-Kinetics-Simulator.exe
   Thermal-Hydraulics-and-LOCA-Simulator.exe
+  Core-Loading-Simulator.exe
 
 Double-click either executable to start it. Python is not required.
 The first launch can take several seconds while the one-file application

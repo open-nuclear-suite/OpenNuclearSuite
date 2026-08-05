@@ -1,7 +1,7 @@
 # Open Nuclear Engineering Teaching Suite
 
-A pair of interactive desktop simulators for teaching introductory reactor
-physics and light-water-reactor thermal-hydraulics. Both applications use
+A collection of three interactive desktop simulators for teaching introductory
+reactor physics, core loading, and light-water-reactor thermal-hydraulics. The applications use
 Python, Tkinter, NumPy, and Matplotlib.
 
 > **Teaching software only.** These simplified, lumped-parameter models are not
@@ -15,8 +15,9 @@ Python, Tkinter, NumPy, and Matplotlib.
 | --- | --- | --- |
 | Reactor Physics and Kinetics | Point kinetics, reactivity, boron, iodine/xenon, decay heat, thermal feedback, load following, trips, and fault injection | `simulators/reactor_teaching_simulator.py` |
 | Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/thermal_hydraulics_simulator.py` |
+| Core Loading Simulator | 11 x 11 loading patterns, two-group diffusion, burnup, fuel management, assembly histories, and guided multi-cycle refueling | `simulators/CoreLoadingSimulator/main.py` |
 
-Both simulators provide interactive controls, trend plots, classroom scenarios,
+The simulators provide interactive controls, trend plots, classroom scenarios,
 and CSV export or logging for post-run analysis.
 
 ## Windows requirements
@@ -78,8 +79,15 @@ or:
 python simulators/thermal_hydraulics_simulator.py
 ```
 
+or:
+
+```cmd
+python simulators/CoreLoadingSimulator/main.py
+```
+
 After setup, Windows users can instead double-click
-`run_reactor_simulator.bat` or `run_thermal_hydraulics_simulator.bat`.
+`run_reactor_simulator.bat`, `run_thermal_hydraulics_simulator.bat`, or
+`run_core_loading_simulator.bat`.
 
 The applications are independent; close one before launching the other if
 screen space or system memory is limited.
@@ -92,10 +100,23 @@ From PowerShell on Windows, run:
 .\build_standalone_windows.ps1
 ```
 
-The script creates one-file, windowed executables for both simulators under
+The script creates one-file, windowed executables for all three simulators under
 `release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows`. The release
 also includes the license, citation metadata, Windows instructions, and
 SHA-256 checksums. End users do not need Python installed.
+
+For faster startup, build folder-based editions instead:
+
+```powershell
+.\build_onedir_windows.ps1
+```
+
+These are created under
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows-Onedir`.
+Each simulator's executable must remain beside its `_internal` folder, but it
+starts faster because bundled components do not need to be unpacked on every
+launch. The build also creates a ZIP of the complete folder-based release for
+distribution.
 
 ## First use
 
@@ -119,6 +140,11 @@ SHA-256 checksums. End users do not need Python installed.
 |-- docs/
 |   `-- MODEL_LIMITATIONS.md
 |-- simulators/
+|   |-- CoreLoadingSimulator/
+|   |   |-- main.py
+|   |   |-- core_loading_thorium_poc_fixed.py
+|   |   |-- test_core_model.py
+|   |   `-- README.md
 |   |-- reactor_teaching_simulator.py
 |   `-- thermal_hydraulics_simulator.py
 |-- .gitignore
@@ -127,6 +153,7 @@ SHA-256 checksums. End users do not need Python installed.
 |-- CONTRIBUTING.md
 |-- LICENSE
 |-- README.md
+|-- run_core_loading_simulator.bat
 |-- run_reactor_simulator.bat
 |-- run_thermal_hydraulics_simulator.bat
 |-- SECURITY.md

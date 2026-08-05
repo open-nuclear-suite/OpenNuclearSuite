@@ -2,9 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".build-venv\Scripts\python.exe"
-$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows"
-$workDir = Join-Path $projectRoot "build"
-$specDir = Join-Path $projectRoot "build-specs"
+$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows-Onedir"
+$workDir = Join-Path $projectRoot "build\onedir"
+$specDir = Join-Path $projectRoot "build-specs\onedir"
 
 if (-not (Test-Path -LiteralPath $python)) {
     py -m venv --system-site-packages (Join-Path $projectRoot ".build-venv")
@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $releaseDir, $workDir, $specDir | Out-
 $commonArgs = @(
     "--noconfirm",
     "--clean",
-    "--onefile",
+    "--onedir",
     "--windowed",
     "--distpath", $releaseDir,
     "--workpath", $workDir,
@@ -41,17 +41,27 @@ $commonArgs = @(
     --exclude-module pandas `
     "$projectRoot\simulators\CoreLoadingSimulator\main.py"
 
-Copy-Item -LiteralPath "$projectRoot\WINDOWS-README.TXT" `
+Copy-Item -LiteralPath "$projectRoot\WINDOWS-README-ONEDIR.TXT" `
     -Destination (Join-Path $releaseDir "README.TXT") -Force
 Copy-Item -LiteralPath "$projectRoot\LICENSE" -Destination $releaseDir -Force
 Copy-Item -LiteralPath "$projectRoot\CITATION.cff" -Destination $releaseDir -Force
 
-Get-FileHash -Algorithm SHA256 `
-    (Join-Path $releaseDir "Reactor-Physics-and-Kinetics-Simulator.exe"), `
-    (Join-Path $releaseDir "Thermal-Hydraulics-and-LOCA-Simulator.exe"), `
-    (Join-Path $releaseDir "Core-Loading-Simulator.exe") |
-    ForEach-Object { "$($_.Hash)  $(Split-Path -Leaf $_.Path)" } |
+$executables = @(
+    (Join-Path $releaseDir "Reactor-Physics-and-Kinetics-Simulator\Reactor-Physics-and-Kinetics-Simulator.exe"),
+    (Join-Path $releaseDir "Thermal-Hydraulics-and-LOCA-Simulator\Thermal-Hydraulics-and-LOCA-Simulator.exe"),
+    (Join-Path $releaseDir "Core-Loading-Simulator\Core-Loading-Simulator.exe")
+)
+
+Get-FileHash -Algorithm SHA256 $executables |
+    ForEach-Object {
+        $relativePath = $_.Path.Substring($releaseDir.Length).TrimStart("\")
+        "$($_.Hash)  $relativePath"
+    } |
     Set-Content -Encoding ascii (Join-Path $releaseDir "SHA256SUMS.txt")
 
-Write-Host "Standalone release created at:"
+$zipPath = "$releaseDir.zip"
+Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
+
+Write-Host "Faster-starting onedir release created at:"
 Write-Host $releaseDir
+Write-Host $zipPath
