@@ -25,5 +25,6 @@ if errorlevel 1 exit /b 1
 
 echo.
 echo Setup complete.
-echo Run run_reactor_simulator.bat or run_thermal_hydraulics_simulator.bat.
+echo Run run_reactor_simulator.bat, run_thermal_hydraulics_simulator.bat,
+echo or run_core_loading_simulator.bat.
 endlocal

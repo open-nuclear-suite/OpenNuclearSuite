@@ -13,8 +13,8 @@ Python, Tkinter, NumPy, and Matplotlib.
 
 | Simulator | Topics | Entry point |
 | --- | --- | --- |
-| Reactor Physics and Kinetics | Point kinetics, reactivity, boron, iodine/xenon, decay heat, thermal feedback, load following, trips, and fault injection | `simulators/reactor_teaching_simulator.py` |
-| Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/thermal_hydraulics_simulator.py` |
+| Reactor Physics and Kinetics | Point kinetics, reactivity balance, nonlinear rod worth, Xe/Sm poisoning, source-range startup, feedback, teaching-cycle exposure, load following, trips, and fault injection | `simulators/ReactorPhysicsSimulator/main.py` |
+| Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/ThermalHydraulicsSimulator/main.py` |
 | Core Loading Simulator | 11 x 11 loading patterns, two-group diffusion, burnup, fuel management, assembly histories, and guided multi-cycle refueling | `simulators/CoreLoadingSimulator/main.py` |
 
 The simulators provide interactive controls, trend plots, classroom scenarios,
@@ -28,7 +28,7 @@ and CSV export or logging for post-run analysis.
 
 During Python installation, select **Add python.exe to PATH** and keep the
 optional Tcl/Tk component enabled. The standard Windows installer includes
-Tkinter, which both simulators use for their interfaces.
+Tkinter, which the simulators use for their interfaces.
 
 ## Installation
 
@@ -70,13 +70,13 @@ setup_windows.bat
 From the repository root in the same activated Command Prompt window:
 
 ```cmd
-python simulators/reactor_teaching_simulator.py
+python simulators/ReactorPhysicsSimulator/main.py
 ```
 
 or:
 
 ```cmd
-python simulators/thermal_hydraulics_simulator.py
+python simulators/ThermalHydraulicsSimulator/main.py
 ```
 
 or:
@@ -127,6 +127,12 @@ distribution.
 5. Treat numerical values as qualitative teaching outputs, not engineering
    predictions.
 
+The reactor simulator starts with validated classroom defaults. Its instructor
+panel can select bounded timescales and an optional advanced core-physics
+profile. The original classroom model remains the startup default. Non-default
+model settings are displayed continuously and recorded in CSV
+exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/README.md).
+
 ## Repository layout
 
 ```text
@@ -145,8 +151,16 @@ distribution.
 |   |   |-- core_loading_thorium_poc_fixed.py
 |   |   |-- test_core_model.py
 |   |   `-- README.md
-|   |-- reactor_teaching_simulator.py
-|   `-- thermal_hydraulics_simulator.py
+|   |-- ReactorPhysicsSimulator/
+|   |   |-- main.py
+|   |   |-- reactor_teaching_simulator.py
+|   |   |-- test_pedagogical_settings.py
+|   |   `-- README.md
+|   |-- ThermalHydraulicsSimulator/
+|   |   |-- main.py
+|   |   |-- thermal_hydraulics_simulator.py
+|   |   |-- test_thermal_hydraulics_physics.py
+|   |   `-- README.md
 |-- .gitignore
 |-- AUTHORS.md
 |-- CITATION.cff
