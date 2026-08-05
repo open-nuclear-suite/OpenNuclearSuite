@@ -43,6 +43,18 @@ reference pressures illustrate increasing injection effectiveness during
 depressurization; they are not plant-specific equipment setpoints or validated
 pump-performance curves.
 
+The thermal-hydraulics model conserves a lumped primary coolant inventory and
+stored energy: break, PORV, vapor, and ECCS flows transport simplified
+enthalpy, and vaporization uses an effective latent heat. Pressure is obtained
+from a compact saturation table through a single saturated-pressurizer state.
+The boiling model distinguishes single-phase convection, nucleate boiling,
+transition boiling, and film boiling using a transparent CHF surrogate based
+on pressure, flow, and core coverage. These additions improve internal
+consistency and classroom trends, but they are not validated water-property,
+critical-flow, CHF/DNB, reflood, or component models. The single primary volume
+cannot reproduce loop seals, counter-current flow, spatial core uncovery,
+break-location effects, or multidimensional behavior.
+
 ## Classroom practice
 
 Instructors should identify the assumptions relevant to each exercise, restore

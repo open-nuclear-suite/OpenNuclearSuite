@@ -25,7 +25,7 @@ Requirements:
     matplotlib
 
 Run:
-    python simulators/thermal_hydraulics_simulator.py
+    python simulators/ThermalHydraulicsSimulator/main.py
 """
 
 from __future__ import annotations
@@ -223,6 +223,13 @@ class Constants:
     Cfuel: float = 950.0
     Cclad: float = 145.0
     Ccool: float = 650.0
+    coolant_energy_reference_C: float = 20.0
+    # Effective h_fg/cp expressed as an equivalent liquid-temperature rise.
+    # This keeps the classroom model conservative without pretending to be a
+    # steam-property package (roughly 2.2 MJ/kg / 4.2 kJ/kg-K).
+    latent_heat_equiv_C: float = 525.0
+    eccs_temp_C: float = 35.0
+    pressurizer_tau: float = 18.0
 
     # Reactivity coefficients. Units are delta-k/k per degC.
     alpha_f: float = -3.5e-5
@@ -234,11 +241,7 @@ class Constants:
     # Simplified inventory and pressure model coefficients.
     break_coeff: float = 0.014
     porv_coeff: float = 0.007
-    evap_coeff: float = 1.0e-5
     eccs_coeff: float = 0.010
-    press_tau: float = 18.0
-    pbreak_coeff: float = 0.17
-    pporv_coeff: float = 0.45
 
     # Classroom warning limits only.
     cladWarn: float = 650.0
@@ -281,12 +284,14 @@ class History:
     M: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     rho: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     flow: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    void: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    chf: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
 
     def as_array(self, name: str) -> np.ndarray:
         return np.array(getattr(self, name), dtype=float)
 
     def clear(self) -> None:
-        for name in ("t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "rho", "flow"):
+        for name in ("t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "rho", "flow", "void", "chf"):
             getattr(self, name).clear()
 
 
@@ -300,6 +305,11 @@ class State:
     Tf: float = field(init=False)
     Tcl: float = field(init=False)
     Tc: float = field(init=False)
+    Ucool: float = field(init=False)
+    Tprz: float = field(init=False)
+    void_fraction: float = 0.0
+    boiling_regime: str = "single-phase"
+    chf_ratio: float = 0.0
     P: float = field(init=False)
     M: float = field(init=False)
     trip: bool = False
@@ -313,6 +323,10 @@ class State:
         self.Tf = self.c.TrefFuel
         self.Tcl = self.c.TrefClad
         self.Tc = self.c.TrefCool
+        self.Ucool = self.c.Ccool * self.c.Mref * (
+            self.Tc - self.c.coolant_energy_reference_C
+        )
+        self.Tprz = 344.8
         self.P = self.c.Pref
         self.M = self.c.Mref
 
@@ -325,6 +339,11 @@ class State:
         self.Tf = c.TrefFuel
         self.Tcl = c.TrefClad
         self.Tc = c.TrefCool
+        self.Ucool = c.Ccool * c.Mref * (self.Tc - c.coolant_energy_reference_C)
+        self.Tprz = 344.8
+        self.void_fraction = 0.0
+        self.boiling_regime = "single-phase"
+        self.chf_ratio = 0.0
         self.P = c.Pref
         self.M = c.Mref
         self.trip = False
@@ -960,7 +979,8 @@ class LWRTeachingSimulator:
         return [
             "time_s", "scenario", "demo_stage", "power_percent", "decay_heat_percent",
             "fuel_temp_C", "clad_temp_C", "coolant_temp_C", "pressure_MPa",
-            "inventory_percent", "rho_pcm", "flow_percent", "trip", "auto_eccs", "auto_trip",
+            "inventory_percent", "void_percent", "chf_ratio", "boiling_regime",
+            "rho_pcm", "flow_percent", "trip", "auto_eccs", "auto_trip",
             "rod_percent", "trim_pcm", "boron_ppm", "pump_percent", "sg_percent",
             "break_percent", "eccs_percent", "afw_percent", "porv_percent", "spray_percent",
             "heater_percent", "rhr_percent",
@@ -976,7 +996,8 @@ class LWRTeachingSimulator:
         row = [
             f"{s.t:.3f}", s.scenario_name, self.demo_stage, f"{indicated_power:.5g}", f"{100.0 * decay_frac_now:.5g}",
             f"{s.Tf:.5g}", f"{s.Tcl:.5g}", f"{s.Tc:.5g}", f"{s.P:.5g}",
-            f"{100.0 * s.M:.5g}", f"{rho_total * 1.0e5:.5g}", f"{100.0 * flow_eff:.5g}",
+            f"{100.0 * s.M:.5g}", f"{100.0 * s.void_fraction:.5g}", f"{s.chf_ratio:.5g}",
+            s.boiling_regime, f"{rho_total * 1.0e5:.5g}", f"{100.0 * flow_eff:.5g}",
             int(s.trip), int(self.auto_eccs_var.get()), int(self.auto_trip_var.get()),
             f"{self.control_vars['rod'].get():.5g}", f"{self.control_vars['trim'].get():.5g}",
             f"{self.control_vars['boron'].get():.5g}", f"{self.control_vars['pump'].get():.5g}",
@@ -1140,6 +1161,64 @@ class LWRTeachingSimulator:
             f = 1.0
         return self.clamp(f, 0.05, 1.0)
 
+    @staticmethod
+    def saturation_temperature(P: float) -> float:
+        """Approximate water saturation temperature in degC from pressure.
+
+        The table is intentionally compact and is only used to put boiling,
+        condensation, and pressurizer response on a mutually consistent curve.
+        It is not a substitute for validated steam tables.
+        """
+        pressures = np.array([0.10, 0.50, 1.0, 2.0, 4.0, 8.0, 12.0, 15.5, 17.5])
+        temperatures = np.array([99.6, 151.8, 179.9, 212.4, 250.4, 295.0, 324.7, 344.8, 355.0])
+        return float(np.interp(P, pressures, temperatures))
+
+    @staticmethod
+    def saturation_pressure(T: float) -> float:
+        """Inverse of :meth:`saturation_temperature`, returning MPa."""
+        temperatures = np.array([99.6, 151.8, 179.9, 212.4, 250.4, 295.0, 324.7, 344.8, 355.0])
+        pressures = np.array([0.10, 0.50, 1.0, 2.0, 4.0, 8.0, 12.0, 15.5, 17.5])
+        return float(np.interp(T, temperatures, pressures))
+
+    def boiling_heat_transfer(
+        self, flow_eff: float, coverage: float
+    ) -> Tuple[float, float, str, float]:
+        """Return clad-coolant conductance, boiling demand, regime and CHF ratio.
+
+        The CHF criterion is a transparent teaching surrogate: available CHF
+        rises with pressure, forced flow, and wetted-core fraction. Crossing it
+        moves the surface to transition/film boiling instead of allowing the
+        former unlimited two-phase heat-transfer enhancement.
+        """
+        c, s = self.c, self.state
+        tsat = self.saturation_temperature(s.P)
+        wall_superheat = max(0.0, s.Tcl - tsat)
+        base = c.Kcc_nom * coverage * (0.20 + 0.80 * flow_eff)
+
+        if wall_superheat <= 3.0:
+            multiplier, regime = 1.0, "single-phase"
+        elif wall_superheat <= 25.0:
+            multiplier = 1.0 + 1.8 * (wall_superheat - 3.0) / 22.0
+            regime = "nucleate boiling"
+        else:
+            multiplier, regime = 2.8, "nucleate boiling"
+
+        q_candidate = max(0.0, base * multiplier * (s.Tcl - s.Tc))
+        pressure_factor = self.clamp(0.55 + 0.035 * s.P, 0.55, 1.15)
+        chf_limit = 4300.0 * coverage * pressure_factor * (0.30 + 0.70 * math.sqrt(max(flow_eff, 0.0)))
+        chf_ratio = q_candidate / max(chf_limit, 1.0)
+
+        if chf_ratio > 1.0:
+            # Smooth degradation avoids a discontinuous ODE while preserving
+            # the key physical lesson: post-CHF heat transfer is much poorer.
+            film_fraction = self.clamp((chf_ratio - 1.0) / 0.6, 0.0, 1.0)
+            multiplier *= 1.0 - 0.86 * film_fraction
+            regime = "transition boiling" if film_fraction < 0.95 else "film boiling"
+
+        conductance = max(1.5, base * multiplier)
+        boiling_demand = max(0.0, conductance * (s.Tcl - s.Tc)) if s.Tc >= tsat - 8.0 else 0.0
+        return conductance, boiling_demand, regime, chf_ratio
+
     def step_model(self, dt: float) -> None:
         c = self.c
         s = self.state
@@ -1209,9 +1288,11 @@ class LWRTeachingSimulator:
         else:
             coverage = max(0.04, 0.20 * s.M / 0.35)
 
-        two_phase_boost = 1.0 + 0.35 * self.clamp((s.Tc - 315.0) / 60.0, 0.0, 1.0)
-        Kcc = c.Kcc_nom * coverage * (0.20 + 0.80 * flow_eff) * two_phase_boost
-        Kcc = max(1.5, Kcc)
+        Kcc, boiling_demand, boiling_regime, chf_ratio = self.boiling_heat_transfer(
+            flow_eff, coverage
+        )
+        s.boiling_regime = boiling_regime
+        s.chf_ratio = chf_ratio
 
         Qfc = c.Kfc * (s.Tf - s.Tcl)
         Qcc = Kcc * (s.Tcl - s.Tc)
@@ -1235,56 +1316,89 @@ class LWRTeachingSimulator:
                 auto_eccs = max(auto_eccs, 1.00)
         eccs = max(eccs_pct / 100.0, auto_eccs)
 
-        # Break flow, relief/PORV flow, and boiling inventory loss.
+        # Break flow, relief/PORV flow, and boiling inventory loss.  Every mass
+        # flow below also transports enthalpy in the coolant-energy balance.
         brk = max(0.0, break_pct / 100.0)
         porv = max(0.0, porv_pct / 100.0)
         break_out = c.break_coeff * brk * math.sqrt(max(s.P - 0.10, 0.0))
         porv_out = c.porv_coeff * porv * math.sqrt(max(s.P - 0.10, 0.0))
-        heat_imbalance = max(0.0, Qcc - Qsg)
-        evap_loss = c.evap_coeff * heat_imbalance * self.clamp((s.Tc - 320.0) / 80.0, 0.0, 1.0)
+        tsat = self.saturation_temperature(s.P)
+        boiling_fraction = self.clamp((s.Tc - (tsat - 5.0)) / 15.0, 0.0, 1.0)
+        evap_power = boiling_fraction * max(0.0, min(boiling_demand, Qcc - 0.5 * Qsg))
+        evap_loss = evap_power / (c.Ccool * c.latent_heat_equiv_C)
         eccs_in = c.eccs_coeff * eccs * self.pressure_eccs_factor(s.P)
 
-        s.M += dt * (eccs_in - break_out - porv_out - evap_loss)
-        s.M = self.clamp(s.M, 0.05, 1.20)
-
-        # ECCS and pressurizer spray cool the primary coolant by cold-water mixing surrogate.
-        Teccs = 35.0
-        Qeccs_cool = 0.0
-        if eccs > 0.0:
-            Qeccs_cool = 2400.0 * eccs * self.pressure_eccs_factor(s.P) * max(0.0, (s.Tc - Teccs) / 300.0)
+        # Limit boundary flows at the declared classroom inventory bounds. The
+        # same effective flows are used in both mass and energy equations.
+        total_out = break_out + porv_out + evap_loss
+        if s.M + dt * (eccs_in - total_out) < 0.05:
+            permitted_out = max(0.0, eccs_in + (s.M - 0.05) / dt)
+            out_scale = permitted_out / max(total_out, 1.0e-12)
+            break_out *= out_scale
+            porv_out *= out_scale
+            evap_loss *= out_scale
+            total_out = permitted_out
+        elif s.M + dt * (eccs_in - total_out) > 1.20:
+            eccs_in = max(0.0, total_out + (1.20 - s.M) / dt)
 
         spray = max(0.0, spray_pct / 100.0)
-        Qspray_cool = 350.0 * spray * max(0.0, (s.Tc - 60.0) / 300.0)
 
         # RHR/shutdown cooling is intentionally made mostly useful at low pressure.
         rhr = max(0.0, rhr_pct / 100.0)
         rhr_available = self.clamp((3.5 - s.P) / 2.5, 0.0, 1.0)
         Qrhr = 1800.0 * rhr * rhr_available * max(0.0, (s.Tc - 60.0) / 280.0)
 
-        # Thermal ODEs.
-        Ccool_eff = c.Ccool * max(0.08, s.M)
+        # Fuel and cladding thermal ODEs.
         dTf = (Qgen - Qfc) / c.Cfuel
         dTcl = (Qfc - Qcc) / c.Cclad
-        dTc = (Qcc - Qsg - Qeccs_cool - Qspray_cool - Qrhr) / Ccool_eff
-
         s.Tf += dt * dTf
         s.Tcl += dt * dTcl
-        s.Tc += dt * dTc
         s.Tf = self.clamp(s.Tf, 20.0, 2800.0)
         s.Tcl = self.clamp(s.Tcl, 20.0, 2200.0)
-        s.Tc = self.clamp(s.Tc, 20.0, 650.0)
 
-        # Pressure ODE. This is a compressed-water / flashing surrogate.
-        pTarget = c.Pref + 0.045 * (s.Tc - c.TrefCool) + 7.0 * (s.M - 1.0)
-        pTarget = self.clamp(pTarget, 0.10, 17.5)
-        dp = (pTarget - s.P) / c.press_tau
-        dp -= c.pbreak_coeff * brk * math.sqrt(max(s.P - 0.10, 0.0))
-        dp -= c.pporv_coeff * porv * math.sqrt(max(s.P - 0.10, 0.0))
-        dp -= 0.35 * spray * max(0.0, (s.P - 0.1) / 15.0)
-        dp += 0.18 * max(0.0, heat_pct / 100.0) * max(0.0, (17.2 - s.P) / 15.0)
-        dp += 0.28 * eccs_in
-        s.P += dt * dp
-        s.P = self.clamp(s.P, 0.10, 17.5)
+        # Conservative primary coolant balance. Ucool is measured relative to
+        # a fixed reference; injection and discharge carry their own enthalpy.
+        # Flashing discharge additionally carries latent heat.
+        liquid_h = c.Ccool * max(0.0, s.Tc - c.coolant_energy_reference_C)
+        injection_h = c.Ccool * max(
+            0.0, c.eccs_temp_C - c.coolant_energy_reference_C
+        )
+        flash_quality = self.clamp(s.void_fraction + boiling_fraction * 0.20, 0.0, 1.0)
+        discharge_h = liquid_h + c.Ccool * c.latent_heat_equiv_C * flash_quality
+        steam_h = liquid_h + c.Ccool * c.latent_heat_equiv_C
+        coolant_power = Qcc - Qsg - Qrhr
+        dUcool = (
+            coolant_power
+            + eccs_in * injection_h
+            - (break_out + porv_out) * discharge_h
+            - evap_loss * steam_h
+        )
+        s.Ucool = max(0.0, s.Ucool + dt * dUcool)
+        s.M += dt * (eccs_in - break_out - porv_out - evap_loss)
+        s.Tc = c.coolant_energy_reference_C + s.Ucool / (c.Ccool * s.M)
+        s.Tc = self.clamp(s.Tc, 20.0, 650.0)
+        # Keep stored energy exactly synchronized if a classroom safety bound
+        # was reached, rather than silently breaking the next-step balance.
+        s.Ucool = c.Ccool * s.M * (s.Tc - c.coolant_energy_reference_C)
+
+        equilibrium_void = boiling_fraction * self.clamp(
+            evap_power / max(Qcc, 1.0), 0.0, 0.85
+        )
+        s.void_fraction += dt * (equilibrium_void - s.void_fraction) / 2.5
+        s.void_fraction = self.clamp(s.void_fraction, 0.0, 0.95)
+
+        # Saturated pressurizer state. Primary thermal expansion and inventory
+        # surge alter pressurizer temperature; pressure is then obtained from
+        # the same saturation curve used by the boiling model.
+        prz_target = 344.8 + 0.55 * (s.Tc - c.TrefCool) + 45.0 * (s.M - 1.0)
+        dTprz = (prz_target - s.Tprz) / c.pressurizer_tau
+        dTprz -= 18.0 * brk * math.sqrt(max(s.P - 0.10, 0.0))
+        dTprz -= 28.0 * porv * math.sqrt(max(s.P - 0.10, 0.0))
+        dTprz -= 13.0 * spray
+        dTprz += 7.0 * max(0.0, heat_pct / 100.0)
+        dTprz += 12.0 * eccs_in
+        s.Tprz = self.clamp(s.Tprz + dt * dTprz, 99.6, 355.0)
+        s.P = self.saturation_pressure(s.Tprz)
 
         s.t += dt
         self.append_history(decay_frac_now, rho_total, flow_eff)
@@ -1305,6 +1419,8 @@ class LWRTeachingSimulator:
         hist.M.append(100.0 * s.M)
         hist.rho.append(rho_total * 1.0e5)
         hist.flow.append(100.0 * flow_eff)
+        hist.void.append(100.0 * s.void_fraction)
+        hist.chf.append(s.chf_ratio)
 
         self.write_csv_row(indicated_power, decay_frac_now, rho_total, flow_eff)
 
@@ -1415,7 +1531,14 @@ class LWRTeachingSimulator:
 
         demo_text = f" | Demo: {self.demo_stage}" if self.demo_mode or self.demo_stage else ""
         log_text = " | CSV logging ON" if self.csv_logging else ""
-        self.status_var.set(f"t = {s.t:.1f} s | Scenario: {s.scenario_name}{demo_text}{log_text} | {alarm}")
+        boiling_text = (
+            f" | Heat transfer: {s.boiling_regime}, void {100.0 * s.void_fraction:.0f}%, "
+            f"CHF ratio {s.chf_ratio:.2f}"
+        )
+        self.status_var.set(
+            f"t = {s.t:.1f} s | Scenario: {s.scenario_name}{demo_text}{log_text}"
+            f"{boiling_text} | {alarm}"
+        )
 
     def set_lamp(self, name: str, on: bool) -> None:
         lamp = self.lamps[name]
