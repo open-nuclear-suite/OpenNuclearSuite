@@ -34,7 +34,8 @@ $commonArgs = @(
 
 & $python -m PyInstaller @commonArgs `
     --name "Thermal-Hydraulics-and-LOCA-Simulator" `
-    "$projectRoot\simulators\thermal_hydraulics_simulator.py"
+    --paths "$projectRoot\simulators\ThermalHydraulicsSimulator" `
+    "$projectRoot\simulators\ThermalHydraulicsSimulator\main.py"
 
 & $python -m PyInstaller @commonArgs `
     --name "Core-Loading-Simulator" `

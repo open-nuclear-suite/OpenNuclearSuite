@@ -14,7 +14,7 @@ Python, Tkinter, NumPy, and Matplotlib.
 | Simulator | Topics | Entry point |
 | --- | --- | --- |
 | Reactor Physics and Kinetics | Point kinetics, reactivity balance, nonlinear rod worth, Xe/Sm poisoning, source-range startup, feedback, teaching-cycle exposure, load following, trips, and fault injection | `simulators/ReactorPhysicsSimulator/main.py` |
-| Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/thermal_hydraulics_simulator.py` |
+| Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/ThermalHydraulicsSimulator/main.py` |
 | Core Loading Simulator | 11 x 11 loading patterns, two-group diffusion, burnup, fuel management, assembly histories, and guided multi-cycle refueling | `simulators/CoreLoadingSimulator/main.py` |
 
 The simulators provide interactive controls, trend plots, classroom scenarios,
@@ -76,7 +76,7 @@ python simulators/ReactorPhysicsSimulator/main.py
 or:
 
 ```cmd
-python simulators/thermal_hydraulics_simulator.py
+python simulators/ThermalHydraulicsSimulator/main.py
 ```
 
 or:
@@ -156,7 +156,11 @@ exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/R
 |   |   |-- reactor_teaching_simulator.py
 |   |   |-- test_pedagogical_settings.py
 |   |   `-- README.md
-|   `-- thermal_hydraulics_simulator.py
+|   |-- ThermalHydraulicsSimulator/
+|   |   |-- main.py
+|   |   |-- thermal_hydraulics_simulator.py
+|   |   |-- test_thermal_hydraulics_physics.py
+|   |   `-- README.md
 |-- .gitignore
 |-- AUTHORS.md
 |-- CITATION.cff
