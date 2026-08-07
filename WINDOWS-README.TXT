@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.0.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.2.0
 Windows standalone release
 
 This folder contains three independent Windows desktop applications:

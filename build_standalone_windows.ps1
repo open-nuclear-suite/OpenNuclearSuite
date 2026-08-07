@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".build-venv\Scripts\python.exe"
-$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows"
+$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows"
 $workDir = Join-Path $projectRoot "build"
 $specDir = Join-Path $projectRoot "build-specs"
 
@@ -55,5 +55,9 @@ Get-FileHash -Algorithm SHA256 `
     ForEach-Object { "$($_.Hash)  $(Split-Path -Leaf $_.Path)" } |
     Set-Content -Encoding ascii (Join-Path $releaseDir "SHA256SUMS.txt")
 
+$zipPath = "$releaseDir.zip"
+Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
+
 Write-Host "Standalone release created at:"
 Write-Host $releaseDir
+Write-Host $zipPath

@@ -101,7 +101,7 @@ From PowerShell on Windows, run:
 ```
 
 The script creates one-file, windowed executables for all three simulators under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows`. The release
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows`. The release
 also includes the license, citation metadata, Windows instructions, and
 SHA-256 checksums. End users do not need Python installed.
 
@@ -112,7 +112,7 @@ For faster startup, build folder-based editions instead:
 ```
 
 These are created under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows-Onedir`.
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows-Onedir`.
 Each simulator's executable must remain beside its `_internal` folder, but it
 starts faster because bundled components do not need to be unpacked on every
 launch. The build also creates a ZIP of the complete folder-based release for

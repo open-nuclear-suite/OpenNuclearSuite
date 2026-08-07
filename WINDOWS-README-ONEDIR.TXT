@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.0.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.2.0
 Windows faster-starting folder release
 
 Each simulator has its own folder. Open the appropriate folder and run:

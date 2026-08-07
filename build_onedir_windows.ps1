@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".build-venv\Scripts\python.exe"
-$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.0.0-Windows-Onedir"
+$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows-Onedir"
 $workDir = Join-Path $projectRoot "build\onedir"
 $specDir = Join-Path $projectRoot "build-specs\onedir"
 
