@@ -1,6 +1,6 @@
 # Reactor simulator physics verification and validation
 
-Tested on 2026-08-05. Run the reproducible suite from the repository root:
+Tested on 2026-08-07. Run the reproducible suite from the repository root:
 
 ```powershell
 python -m unittest discover -s simulators/ReactorPhysicsSimulator -p "test_*.py" -v
@@ -27,6 +27,11 @@ changes.
 | Critical kinetics | Source-free, zero-reactivity 100 s transient | Power remains within `1e-10` of initial value | Pass |
 | Reactor period | Independent six-group inhour root for a `+20 pcm` step | Simulated asymptotic growth rate within `0.2%` | Pass; approximately `0.11%` difference |
 | Time integration | Repeat a 20 s transient at `dt = 0.04, 0.02, 0.01, 0.005 s` | Error decreases under refinement; production-step relative difference below `1e-7` | Pass |
+| Representative LWR equilibrium | Source-free critical state with `Lambda = 2.0e-5 s` and a 3000 MWth reference | Normalized power and dimensional heat remain at 100% / 3000 MWth | Pass |
+| Representative LWR integration | Initialize the independent positive inhour eigenmode for a `+20 pcm` insertion | RK4/substep growth rate within `0.2%` of the inhour root | Pass |
+| Representative LWR SCRAM | Initiate a full SCRAM from equilibrium | Rod bank moves at the declared finite insertion rate rather than instantaneously | Pass |
+| Representative LWR thermal equilibrium | Independently evaluate deposition, node-to-node transfer, and heat removal at rated conditions | 2910, 2970, and 3000 MW transfers with stationary node temperatures | Pass |
+| Representative LWR energy conservation | Reduce the heat sink for one isolated thermal step and compare stored energy with generated minus removed heat | Agreement within floating-point tolerance and zero algebraic balance residual | Pass |
 | Rod worth | Monotonicity, symmetry, and finite-difference derivative | Curve monotonic and antisymmetric; analytic and numerical slopes agree within `1e-7 pcm/%` | Pass |
 | Xe/I and Sm/Pm | Evaluate four equilibrium equations directly | Absolute residual below `1e-15` | Pass |
 | Decay heat | Compare initialized groups with their equilibrium definition | Machine-precision agreement and total heat equals initial power | Pass |
@@ -66,6 +71,10 @@ model. The following are illustrative rather than physically validated:
 - one-EFPD-per-second cycle compression, excess-reactivity curve, and boron
   target;
 - lumped three-node temperatures and protection thresholds.
+- the 3000 MWth Representative LWR rating, which is a declared teaching
+  reference and is not tied to a specific plant design;
+- conversion of the declared effective thermal inventories and conductances,
+  or normalized poison parameters, into plant-specific equipment performance.
 
 Consequently, passing these tests supports classroom consistency and numerical
 correctness only. It does not support reactor design, licensing, operator

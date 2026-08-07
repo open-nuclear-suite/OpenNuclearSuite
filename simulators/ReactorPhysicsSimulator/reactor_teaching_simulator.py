@@ -38,10 +38,12 @@ Important:
 
 import csv
 import math
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
@@ -62,6 +64,49 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 # ============================================================
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
+
+ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+
+We would be delighted to hear from educators, students, researchers, and other users of this software.
+
+Please consider sending us a postcard or a short thank-you email describing:
+
+• where you are using the software;
+• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
+• any comments or experiences you would like to share.
+
+Postcards may be sent to:
+
+Dean
+Faculty of Chemical and Energy Engineering
+Universiti Teknologi Malaysia
+81310 UTM Skudai
+Johor
+Malaysia
+
+Email: fcee@utm.my
+
+Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
+
+Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+
+
+def show_suite_about(parent):
+    """Show the suite-wide user outreach message in a dedicated window."""
+    window = tk.Toplevel(parent)
+    window.title("About — Open Nuclear Engineering Teaching Suite")
+    window.geometry("720x650")
+    window.minsize(560, 480)
+    window.transient(parent)
+    text = tk.Text(window, wrap=tk.WORD, padx=24, pady=20, font=("Segoe UI", 10), relief=tk.FLAT)
+    text.pack(fill=tk.BOTH, expand=True)
+    text.insert("1.0", ABOUT_MESSAGE)
+    text.configure(state=tk.DISABLED)
+    actions = ttk.Frame(window, padding=(16, 10))
+    actions.pack(fill=tk.X)
+    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
+    window.focus_set()
 SPLASH_LOGO_FILENAME = "UTM.logo.png"
 BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
@@ -70,6 +115,28 @@ KINETICS_PRESETS = {
     "Classroom": 0.080,
     "Intermediate": 0.020,
     "Advanced": 0.005,
+    # Representative teaching value for a large thermal-power LWR.  This
+    # profile uses adaptive internal RK4 substeps rather than the legacy Euler
+    # update used by the three classroom-scaled presets.
+    "Representative LWR": 2.0e-5,
+}
+
+REFERENCE_LWR_POWER_MWTH = 3000.0
+
+# Effective whole-core teaching parameters for the Representative LWR profile.
+# They are selected to reproduce the declared 565/425/345/285 C full-power
+# equilibrium while preserving a transparent three-node energy balance.  They
+# are not parameters from a specific commercial reactor.
+REFERENCE_LWR_THERMAL = {
+    "fuel_capacity_mj_per_k": 160.0,
+    "clad_capacity_mj_per_k": 180.0,
+    "coolant_capacity_mj_per_k": 900.0,
+    "fuel_deposition_fraction": 0.97,
+    "clad_deposition_fraction": 0.02,
+    "coolant_deposition_fraction": 0.01,
+    "fuel_clad_conductance_mw_per_k": 0.97 * REFERENCE_LWR_POWER_MWTH / 140.0,
+    "clad_coolant_conductance_mw_per_k": 0.99 * REFERENCE_LWR_POWER_MWTH / 80.0,
+    "heat_removal_conductance_mw_per_k": REFERENCE_LWR_POWER_MWTH / 60.0,
 }
 
 XENON_PRESETS = {
@@ -98,7 +165,10 @@ CYCLE_PRESETS = {
 
 
 def kinetics_preset_label(name):
-    return f"{name} (Lambda = {KINETICS_PRESETS[name]:.3f} s)"
+    value = KINETICS_PRESETS[name]
+    if name == "Representative LWR":
+        return f"{name} (Lambda = {value:.1e} s, {REFERENCE_LWR_POWER_MWTH:.0f} MWth)"
+    return f"{name} (Lambda = {value:.3f} s)"
 
 
 def xenon_preset_label(name):
@@ -146,6 +216,10 @@ class PedagogicalSettings:
     @property
     def advanced_physics(self):
         return self.physics_profile == "Advanced core physics"
+
+    @property
+    def dimensioned_lwr(self):
+        return self.kinetics_preset == "Representative LWR"
 
     @property
     def subcritical_startup(self):
@@ -354,6 +428,9 @@ EXPORT_COLUMNS = [
     "scram_active",
     "kinetics_preset",
     "prompt_generation_time_s",
+    "kinetics_integrator",
+    "kinetics_substeps",
+    "rated_power_mwth",
     "xenon_preset",
     "xenon_time_multiplier",
     "load_follow_period_s",
@@ -361,9 +438,19 @@ EXPORT_COLUMNS = [
     "initial_condition",
     "cycle_preset",
     "true_power_pct",
+    "true_power_mwth",
     "measured_power_pct",
     "total_heat_pct",
+    "total_heat_mwth",
     "decay_heat_pct",
+    "decay_heat_mwth",
+    "fuel_heat_capacity_mj_per_k",
+    "clad_heat_capacity_mj_per_k",
+    "coolant_heat_capacity_mj_per_k",
+    "fuel_to_clad_heat_mw",
+    "clad_to_coolant_heat_mw",
+    "heat_removed_mw",
+    "thermal_energy_residual_mw",
     "target_power_pct",
     "reactivity_pcm",
     "rho_rod_pcm",
@@ -428,6 +515,14 @@ class ReactorState:
 
         # Effective prompt generation time is slowed for classroom visualization.
         self.Lambda = self.pedagogical_settings.prompt_generation_time_s
+        self.rated_power_mwth = (
+            REFERENCE_LWR_POWER_MWTH if self.pedagogical_settings.dimensioned_lwr else None
+        )
+        self.kinetics_integrator = (
+            "RK4 with automatic substeps" if self.pedagogical_settings.dimensioned_lwr
+            else "Legacy explicit Euler"
+        )
+        self.kinetics_substeps = 1
         self.source = 1.0e-5 if self.pedagogical_settings.subcritical_startup else 1.0e-6
         self.source_strength = self.source
 
@@ -486,6 +581,7 @@ class ReactorState:
         self.boron_ppm = initial_boron if advanced else 0.0
         self.boron_coeff = 3.0e-6
         self.autoRodGain = 8.0                 # % rod per second per unit power error
+        self.scram_rod_speed_pct_s = 100.0     # representative bank insertion, % travel/s
         self.loadFollowPeriod = self.pedagogical_settings.load_follow_period_s
 
         # Reactivity terms.
@@ -519,6 +615,32 @@ class ReactorState:
         self.tauF = 8.0
         self.tauCl = 5.0
         self.tauC = 18.0
+        if self.pedagogical_settings.dimensioned_lwr:
+            thermal = REFERENCE_LWR_THERMAL
+            self.fuel_heat_capacity_mj_per_k = thermal["fuel_capacity_mj_per_k"]
+            self.clad_heat_capacity_mj_per_k = thermal["clad_capacity_mj_per_k"]
+            self.coolant_heat_capacity_mj_per_k = thermal["coolant_capacity_mj_per_k"]
+        else:
+            self.fuel_heat_capacity_mj_per_k = None
+            self.clad_heat_capacity_mj_per_k = None
+            self.coolant_heat_capacity_mj_per_k = None
+        self.fuel_to_clad_heat_mw = 0.0
+        self.clad_to_coolant_heat_mw = 0.0
+        self.heat_removed_mw = 0.0
+        self.thermal_energy_residual_mw = 0.0
+        if self.pedagogical_settings.dimensioned_lwr:
+            self.fuel_to_clad_heat_mw = (
+                REFERENCE_LWR_THERMAL["fuel_clad_conductance_mw_per_k"]
+                * (self.fuelT - self.cladT)
+            )
+            self.clad_to_coolant_heat_mw = (
+                REFERENCE_LWR_THERMAL["clad_coolant_conductance_mw_per_k"]
+                * (self.cladT - self.coolT)
+            )
+            self.heat_removed_mw = (
+                REFERENCE_LWR_THERMAL["heat_removal_conductance_mw_per_k"]
+                * (self.coolT - self.inletT)
+            )
 
         # Delayed neutron precursors initialized at equilibrium.
         self.C = (self.beta_i / (self.Lambda * self.lambda_i)) * self.P
@@ -666,6 +788,9 @@ class ReactorState:
             "scram_active": int(self.scram),
             "kinetics_preset": self.pedagogical_settings.kinetics_preset,
             "prompt_generation_time_s": self.Lambda,
+            "kinetics_integrator": self.kinetics_integrator,
+            "kinetics_substeps": self.kinetics_substeps,
+            "rated_power_mwth": "" if self.rated_power_mwth is None else self.rated_power_mwth,
             "xenon_preset": self.pedagogical_settings.xenon_preset,
             "xenon_time_multiplier": self.pedagogical_settings.xenon_time_multiplier,
             "load_follow_period_s": self.loadFollowPeriod,
@@ -673,9 +798,19 @@ class ReactorState:
             "initial_condition": self.pedagogical_settings.initial_condition,
             "cycle_preset": self.pedagogical_settings.cycle_preset,
             "true_power_pct": self.powerPct,
+            "true_power_mwth": "" if self.rated_power_mwth is None else self.rated_power_mwth * self.P,
             "measured_power_pct": self.measuredPct,
             "total_heat_pct": self.heatPct,
+            "total_heat_mwth": "" if self.rated_power_mwth is None else self.rated_power_mwth * self.Qheat,
             "decay_heat_pct": self.decayPct,
+            "decay_heat_mwth": "" if self.rated_power_mwth is None else self.rated_power_mwth * self.Qdecay,
+            "fuel_heat_capacity_mj_per_k": "" if self.fuel_heat_capacity_mj_per_k is None else self.fuel_heat_capacity_mj_per_k,
+            "clad_heat_capacity_mj_per_k": "" if self.clad_heat_capacity_mj_per_k is None else self.clad_heat_capacity_mj_per_k,
+            "coolant_heat_capacity_mj_per_k": "" if self.coolant_heat_capacity_mj_per_k is None else self.coolant_heat_capacity_mj_per_k,
+            "fuel_to_clad_heat_mw": "" if self.rated_power_mwth is None else self.fuel_to_clad_heat_mw,
+            "clad_to_coolant_heat_mw": "" if self.rated_power_mwth is None else self.clad_to_coolant_heat_mw,
+            "heat_removed_mw": "" if self.rated_power_mwth is None else self.heat_removed_mw,
+            "thermal_energy_residual_mw": "" if self.rated_power_mwth is None else self.thermal_energy_residual_mw,
             "target_power_pct": self.targetPct,
             "reactivity_pcm": self.reactivity_pcm,
             "rho_rod_pcm": 1.0e5 * self.rho_rods,
@@ -774,6 +909,110 @@ class ReactorModel:
             writer.writerows(self.s.export_rows)
         return len(self.s.export_rows)
 
+    @staticmethod
+    def _kinetics_derivative(state, power, precursors):
+        delayed_source = float(np.sum(state.lambda_i * precursors))
+        power_rate = (
+            ((state.rho_total - state.beta) / state.Lambda) * power
+            + delayed_source
+            + state.source_strength
+        )
+        precursor_rate = (state.beta_i / state.Lambda) * power - state.lambda_i * precursors
+        return power_rate, precursor_rate
+
+    def _advance_point_kinetics(self):
+        """Advance neutron power and precursors over one global model step.
+
+        Existing classroom presets retain the historical Euler calculation.
+        The dimensioned LWR preset uses RK4 substeps sized from the fast prompt
+        mode, avoiding a globally tiny timestep for thermal and poison states.
+        Reactivity and source are held constant during this 20 ms outer step.
+        """
+        state = self.s
+        if not state.pedagogical_settings.dimensioned_lwr:
+            old_precursors = state.C.copy()
+            power_rate, precursor_rate = self._kinetics_derivative(
+                state, state.P, old_precursors
+            )
+            state.P = clamp(state.P + power_rate * state.dt, 1.0e-8, 3.0)
+            state.C = np.maximum(old_precursors + precursor_rate * state.dt, 0.0)
+            state.kinetics_substeps = 1
+            return
+
+        # Resolve the near-critical prompt-mode time constant Lambda / beta
+        # with at least five RK4 steps.  This is an accuracy policy rather than
+        # a wall-clock speed setting.
+        maximum_step = max(1.0e-6, 0.20 * state.Lambda / state.beta)
+        substeps = max(1, int(math.ceil(state.dt / maximum_step)))
+        step = state.dt / substeps
+        power = state.P
+        precursors = state.C.copy()
+
+        for _ in range(substeps):
+            k1p, k1c = self._kinetics_derivative(state, power, precursors)
+            k2p, k2c = self._kinetics_derivative(
+                state, power + 0.5 * step * k1p, precursors + 0.5 * step * k1c
+            )
+            k3p, k3c = self._kinetics_derivative(
+                state, power + 0.5 * step * k2p, precursors + 0.5 * step * k2c
+            )
+            k4p, k4c = self._kinetics_derivative(
+                state, power + step * k3p, precursors + step * k3c
+            )
+            power += (step / 6.0) * (k1p + 2.0 * k2p + 2.0 * k3p + k4p)
+            precursors += (step / 6.0) * (k1c + 2.0 * k2c + 2.0 * k3c + k4c)
+
+        state.P = clamp(float(power), 1.0e-8, 3.0)
+        state.C = np.maximum(precursors, 0.0)
+        state.kinetics_substeps = substeps
+
+    def _advance_thermal_nodes(self):
+        """Advance either the legacy response model or the LWR energy balance."""
+        state = self.s
+        flow = max(state.coolantFlow / 100.0, 0.20)
+        sink = max(state.heatSink / 100.0, 0.30)
+        state.inletT = 285.0 + 5.0 * (1.0 - flow) - 8.0 * (sink - 1.0)
+
+        if not state.pedagogical_settings.dimensioned_lwr:
+            cool_eq = state.inletT + 60.0 * state.Qheat / (flow * sink)
+            clad_eq = cool_eq + 80.0 * state.Qheat / flow
+            fuel_eq = clad_eq + 140.0 * state.Qheat / flow
+            state.fuelT += ((fuel_eq - state.fuelT) / state.tauF) * state.dt
+            state.cladT += ((clad_eq - state.cladT) / state.tauCl) * state.dt
+            state.coolT += ((cool_eq - state.coolT) / state.tauC) * state.dt
+            return
+
+        thermal = REFERENCE_LWR_THERMAL
+        generated_heat_mw = state.rated_power_mwth * state.Qheat
+        fuel_deposition_mw = thermal["fuel_deposition_fraction"] * generated_heat_mw
+        clad_deposition_mw = thermal["clad_deposition_fraction"] * generated_heat_mw
+        coolant_deposition_mw = thermal["coolant_deposition_fraction"] * generated_heat_mw
+
+        fuel_clad_conductance = thermal["fuel_clad_conductance_mw_per_k"] * flow
+        clad_coolant_conductance = thermal["clad_coolant_conductance_mw_per_k"] * flow
+        removal_conductance = thermal["heat_removal_conductance_mw_per_k"] * flow * sink
+
+        state.fuel_to_clad_heat_mw = fuel_clad_conductance * (state.fuelT - state.cladT)
+        state.clad_to_coolant_heat_mw = clad_coolant_conductance * (state.cladT - state.coolT)
+        state.heat_removed_mw = removal_conductance * (state.coolT - state.inletT)
+
+        fuel_storage_mw = fuel_deposition_mw - state.fuel_to_clad_heat_mw
+        clad_storage_mw = (
+            clad_deposition_mw + state.fuel_to_clad_heat_mw - state.clad_to_coolant_heat_mw
+        )
+        coolant_storage_mw = (
+            coolant_deposition_mw + state.clad_to_coolant_heat_mw - state.heat_removed_mw
+        )
+        state.thermal_energy_residual_mw = (
+            fuel_storage_mw + clad_storage_mw + coolant_storage_mw
+            - (generated_heat_mw - state.heat_removed_mw)
+        )
+
+        # MW is MJ/s, so division by the effective MJ/K inventories gives K/s.
+        state.fuelT += fuel_storage_mw / state.fuel_heat_capacity_mj_per_k * state.dt
+        state.cladT += clad_storage_mw / state.clad_heat_capacity_mj_per_k * state.dt
+        state.coolT += coolant_storage_mw / state.coolant_heat_capacity_mj_per_k * state.dt
+
     def advance(self, seconds_to_advance):
         s = self.s
         nsteps = max(1, int(round(seconds_to_advance / s.dt)))
@@ -815,9 +1054,18 @@ class ReactorModel:
             if s.scram and not s.fault_stuck_rod:
                 if s.fault_partial_scram:
                     failed_scram_rod_pos = 5.0 + 35.0 * sev
-                    s.rod_pos = clamp(failed_scram_rod_pos, 0.0, 45.0)
+                    if s.pedagogical_settings.dimensioned_lwr:
+                        s.rod_pos = max(
+                            failed_scram_rod_pos,
+                            s.rod_pos - s.scram_rod_speed_pct_s * s.dt,
+                        )
+                    else:
+                        s.rod_pos = clamp(failed_scram_rod_pos, 0.0, 45.0)
                 else:
-                    s.rod_pos = 0.0
+                    if s.pedagogical_settings.dimensioned_lwr:
+                        s.rod_pos = max(0.0, s.rod_pos - s.scram_rod_speed_pct_s * s.dt)
+                    else:
+                        s.rod_pos = 0.0
 
             if s.fault_stuck_rod and s.stuck_rod_pos is not None:
                 s.rod_pos = clamp(s.stuck_rod_pos, 0.0, 100.0)
@@ -846,13 +1094,7 @@ class ReactorModel:
             # Explicit integration substeps.
             s.update_reactivity_terms()
 
-            C_old = s.C.copy()
-            delayed_source = float(np.sum(s.lambda_i * C_old))
-            dPdt = ((s.rho_total - s.beta) / s.Lambda) * s.P + delayed_source + s.source_strength
-            dCdt = (s.beta_i / s.Lambda) * s.P - s.lambda_i * C_old
-
-            s.P = clamp(s.P + dPdt * s.dt, 1.0e-8, 3.0)
-            s.C = np.maximum(C_old + dCdt * s.dt, 0.0)
+            self._advance_point_kinetics()
 
             # Decay heat groups build during operation and remain after SCRAM.
             dDh = (s.decay_frac * s.P - s.Dh) / s.decay_tau
@@ -876,19 +1118,10 @@ class ReactorModel:
                 s.Pm = max(s.Pm + dPm * s.dt, 0.0)
                 s.Sm = max(s.Sm + dSm * s.dt, 0.0)
 
-            # Three-node thermal model. Flow removes heat; heat sink/load represents
-            # secondary-side heat rejection or turbine/steam-generator load.
-            flow = max(s.coolantFlow / 100.0, 0.20)
-            sink = max(s.heatSink / 100.0, 0.30)
-            s.inletT = 285.0 + 5.0 * (1.0 - flow) - 8.0 * (sink - 1.0)
-
-            cool_eq = s.inletT + 60.0 * s.Qheat / (flow * sink)
-            clad_eq = cool_eq + 80.0 * s.Qheat / flow
-            fuel_eq = clad_eq + 140.0 * s.Qheat / flow
-
-            s.fuelT += ((fuel_eq - s.fuelT) / s.tauF) * s.dt
-            s.cladT += ((clad_eq - s.cladT) / s.tauCl) * s.dt
-            s.coolT += ((cool_eq - s.coolT) / s.tauC) * s.dt
+            # Three-node thermal response.  The Representative LWR profile uses
+            # a dimensional MW/MJ energy balance; legacy profiles retain their
+            # historical equilibrium-response equations.
+            self._advance_thermal_nodes()
 
             # Noisy indicated neutron power, with mild temporal correlation.
             phi = math.exp(-s.dt / max(0.2, s.noiseTau))
@@ -967,6 +1200,19 @@ class ReactorModel:
             f"C1..C6: {cstr}",
             "---- Event Log ----",
         ]
+        if s.rated_power_mwth is not None:
+            out.insert(
+                6,
+                f"Reference thermal power:       {s.rated_power_mwth * s.P:7.1f} / {s.rated_power_mwth:7.1f} MWth",
+            )
+            out.insert(
+                7,
+                f"Kinetics: {s.kinetics_integrator} ({s.kinetics_substeps} substeps per {s.dt:g} s)",
+            )
+            out.insert(
+                8,
+                f"Core heat / removed:           {s.rated_power_mwth * s.Qheat:7.1f} / {s.heat_removed_mw:7.1f} MW",
+            )
         out.extend(s.logText)
         return out
 
@@ -1460,6 +1706,10 @@ class ReactorTeachingSimulatorTk:
 
         self.model = ReactorModel()
         self.syncing_controls = False
+        self.active_scale = None
+        self.display_dirty = False
+        self.display_refresh_interval_s = 0.20
+        self.last_display_refresh = time.perf_counter()
         self.diagnostics_window = None
         self.diagnostic_vars = {}
         self.syncing_diagnostics = False
@@ -1529,12 +1779,16 @@ class ReactorTeachingSimulatorTk:
         if self.utm_logo_image is not None:
             tk.Label(
                 header, image=self.utm_logo_image, bg=self.colors["bg"], bd=0,
-            ).grid(row=0, column=1, sticky="e", padx=(18, 0))
+            ).grid(row=0, column=2, sticky="e", padx=(18, 0))
         else:
             tk.Label(
                 header, text="UTM", bg="#7d1238", fg="white",
                 font=("Segoe UI", 18, "bold"), padx=18, pady=6,
-            ).grid(row=0, column=1, sticky="e", padx=(18, 0))
+            ).grid(row=0, column=2, sticky="e", padx=(18, 0))
+
+        ttk.Button(header, text="ABOUT", command=lambda: show_suite_about(self.root)).grid(
+            row=0, column=1, sticky="e", padx=(18, 0),
+        )
 
         pane_font = ("Segoe UI", 11, "bold")
         self.left_pane = ScrollablePane(
@@ -1701,6 +1955,14 @@ class ReactorTeachingSimulatorTk:
         )
         self.fault_severity_scale.set(self.model.s.fault_severity)
         self.fault_severity_scale.place(x=540, y=32, width=245, height=45)
+        self.fault_severity_scale.bind(
+            "<ButtonPress-1>",
+            lambda _event: self._begin_scale_drag(self.fault_severity_scale),
+        )
+        self.fault_severity_scale.bind(
+            "<ButtonRelease-1>",
+            lambda _event: self._end_scale_drag(self.fault_severity_scale),
+        )
 
         tk.Button(
             self.fault_frame, text="EXPORT CSV", bg="#285b6b", fg="white",
@@ -1734,7 +1996,22 @@ class ReactorTeachingSimulatorTk:
         )
         scale.set(initv)
         scale.place(x=20, y=y + 16, width=250, height=42)
+        scale.bind("<ButtonPress-1>", lambda _event, widget=scale: self._begin_scale_drag(widget))
+        scale.bind("<ButtonRelease-1>", lambda _event, widget=scale: self._end_scale_drag(widget))
         return scale, val_label
+
+    def _begin_scale_drag(self, scale):
+        self.active_scale = scale
+
+    def _end_scale_drag(self, scale):
+        if self.active_scale is scale:
+            self.active_scale = None
+        self.sync_controls_from_model()
+        self.request_display_refresh()
+
+    def request_display_refresh(self):
+        """Queue an expensive plant-display redraw without blocking UI input."""
+        self.display_dirty = True
 
     def _make_lamp(self, text, x, y):
         lbl = tk.Label(self.left, text=text, bg=self.colors["lamp_off"], fg="white",
@@ -2075,7 +2352,7 @@ class ReactorTeachingSimulatorTk:
         if s.scram and s.rod_pos > 5.0:
             s.scram = False
             s.add_log("SCRAM cleared by rod withdrawal. Use RESET for a clean restart if desired.")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def flow_cb(self, val, label):
         if self.syncing_controls:
@@ -2086,7 +2363,7 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.coolantFlow = float(val)
         label.config(text=f"{self.model.s.coolantFlow:5.1f} %")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def sink_cb(self, val, label):
         if self.syncing_controls:
@@ -2097,7 +2374,7 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.heatSink = float(val)
         label.config(text=f"{self.model.s.heatSink:5.1f} %")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def noise_cb(self, val, label):
         if self.syncing_controls:
@@ -2105,7 +2382,7 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.noiseAmp = float(val)
         label.config(text=f"{self.model.s.noiseAmp:4.1f} %")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def setpoint_cb(self, val, label):
         if self.syncing_controls:
@@ -2113,7 +2390,7 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.setpoint = float(val) / 100.0
         label.config(text=f"{100*self.model.s.setpoint:5.1f} %")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def boron_cb(self, val, label):
         if self.syncing_controls:
@@ -2121,7 +2398,7 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.boron_ppm = float(val)
         label.config(text=f"{self.model.s.boron_ppm:5.0f}")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def minus_cb(self):
         self.model.s.rho_manual = clamp(self.model.s.rho_manual - 5e-5, -0.010, 0.010)
@@ -2218,23 +2495,30 @@ class ReactorTeachingSimulatorTk:
             return
         self.model.s.fault_severity = float(val)
         self.fault_severity_label.config(text=f"Fault severity: {float(val):.0f}%")
-        self.refresh_all()
+        self.request_display_refresh()
 
     def sync_controls_from_model(self):
         s = self.model.s
         self.syncing_controls = True
         try:
-            self.rod_scale.set(s.rod_pos)
-            self.flow_scale.set(s.coolantFlow)
-            self.sink_scale.set(s.heatSink)
-            self.noise_scale.set(s.noiseAmp)
-            self.set_scale.set(100 * s.setpoint)
-            self.boron_scale.set(s.boron_ppm)
+            if self.active_scale is not self.rod_scale:
+                self.rod_scale.set(s.rod_pos)
+            if self.active_scale is not self.flow_scale:
+                self.flow_scale.set(s.coolantFlow)
+            if self.active_scale is not self.sink_scale:
+                self.sink_scale.set(s.heatSink)
+            if self.active_scale is not self.noise_scale:
+                self.noise_scale.set(s.noiseAmp)
+            if self.active_scale is not self.set_scale:
+                self.set_scale.set(100 * s.setpoint)
+            if self.active_scale is not self.boron_scale:
+                self.boron_scale.set(s.boron_ppm)
             self.mode_var.set(s.mode)
             if hasattr(self, "fault_vars"):
                 for key, var in self.fault_vars.items():
                     var.set(1 if getattr(s, key) else 0)
-                self.fault_severity_scale.set(s.fault_severity)
+                if self.active_scale is not self.fault_severity_scale:
+                    self.fault_severity_scale.set(s.fault_severity)
                 self.fault_severity_label.config(text=f"Fault severity: {s.fault_severity:.0f}%")
         finally:
             self.syncing_controls = False
@@ -2282,10 +2566,23 @@ class ReactorTeachingSimulatorTk:
         if self.readout.size() > 0:
             self.readout.see(tk.END)
         self.refresh_diagnostics()
+        self.display_dirty = False
+        self.last_display_refresh = time.perf_counter()
 
     def schedule_loop(self):
-        if self.model.s.running:
+        # Treat an active operator drag as a momentary hold.  This keeps the
+        # displayed transient and model time synchronized while the expensive
+        # Matplotlib redraw is deferred, then resumes automatically on release.
+        if self.model.s.running and self.active_scale is None:
             self.model.advance(0.20)
+            self.display_dirty = True
+
+        now = time.perf_counter()
+        if (
+            self.display_dirty
+            and self.active_scale is None
+            and now - self.last_display_refresh >= self.display_refresh_interval_s
+        ):
             self.sync_controls_from_model()
             self.refresh_all()
         self.root.after(40, self.schedule_loop)

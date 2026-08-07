@@ -25,7 +25,7 @@ the simulation is paused, open **Instructor: Pedagogical Settings** to select:
 
 | Setting | Available values |
 | --- | --- |
-| Prompt kinetics | Classroom (`Lambda = 0.080 s`), Intermediate (`0.020 s`), Advanced (`0.005 s`) |
+| Prompt kinetics | Classroom (`Lambda = 0.080 s`), Intermediate (`0.020 s`), Advanced (`0.005 s`), or Representative LWR (`2.0e-5 s`, 3000 MWth reference) |
 | I-135/Xe-135 timescale | Laboratory demo (`60/90 s` half-times), Extended exercise (`300/450 s`), Reference trend (`21600/32400 s`) |
 | Load-follow period | `60-600 s` |
 | Core-physics detail | Classroom model (default) or Advanced core physics |
@@ -40,6 +40,41 @@ validated defaults** to return to the standard classroom configuration.
 These controls change the model equations and must not be confused with a
 wall-clock animation-speed control. Decay-heat timescales remain fixed, and
 unbounded custom kinetic constants are intentionally unavailable.
+
+## Representative LWR kinetics and power profile
+
+The optional **Representative LWR** kinetics preset retains normalized power
+internally while declaring 100% power as 3000 MWth. The operator readout and
+CSV export therefore report both percent power and MWth. It uses fourth-order
+Runge-Kutta integration with automatic internal substeps selected from the
+fast prompt-mode timescale.
+
+The same profile replaces the legacy temperature-target response with an
+explicit three-node MW/MJ energy balance. Its declared effective parameters
+are:
+
+| Quantity | Teaching reference |
+| --- | ---: |
+| Fuel heat capacity | 160 MJ/K |
+| Cladding heat capacity | 180 MJ/K |
+| Coolant heat capacity | 900 MJ/K |
+| Fuel / clad / direct-coolant deposition | 97% / 2% / 1% |
+| Fuel-to-clad conductance at rated flow | 20.786 MW/K |
+| Clad-to-coolant conductance at rated flow | 37.125 MW/K |
+| Heat-removal conductance at rated flow and sink | 50 MW/K |
+
+At the declared 565/425/345/285 C full-power equilibrium, the model transfers
+2910 MW from fuel to clad, 2970 MW from clad to coolant, and removes 3000 MW.
+Flow changes scale the two internal conductances and the heat-removal path;
+heat-sink changes scale the heat-removal path. CSV output records all three
+heat flows and a numerical energy-balance residual.
+
+This is a reference model, not a plant specification. The effective thermal
+inventories and conductances are transparent teaching parameters selected to
+reproduce the declared equilibrium; they are not taken from a particular 3000
+MWth plant. Poison yields, flow and heat-sink percentages, equipment curves,
+and trip setpoints remain classroom models. Dimensional units and conservation
+do not make the resulting temperatures or equipment response plant-valid.
 
 ## Advanced core physics profile
 
@@ -72,9 +107,16 @@ laboratory-period demonstration and is not plant time.
 The model uses explicit Euler integration with `dt = 0.02 s`. Near the initial
 critical state, the fast prompt-mode eigenvalue is approximately
 `-beta / Lambda`, giving the scalar stability condition `dt < 2 Lambda / beta`.
-All three bounded kinetics presets retain ample linear stability margin at the
+All three legacy bounded kinetics presets retain ample linear stability margin at the
 current timestep. Any future custom mode would require separate numerical
 validation and a conservative timestep policy.
+
+The Representative LWR preset is intentionally different: its realistic-scale
+prompt generation time makes a single 0.02 s explicit-Euler step unsuitable.
+The simulator consequently subdivides each outer step and integrates the six-
+group equations with RK4. Normal runs use approximately 33 kinetics substeps
+per outer step. The legacy presets retain their original Euler implementation
+to preserve classroom-default regression behavior.
 
 ## Scope
 

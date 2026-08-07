@@ -37,6 +37,17 @@ analysis.
 Scenario results should therefore be interpreted as qualitative trends. A
 plausible-looking numerical value is not evidence of physical accuracy.
 
+The optional Representative LWR kinetics preset declares 100% normalized
+power as 3000 MWth, uses a realistic-scale prompt generation time with
+internally substepped RK4 integration, and couples power to a conservative
+three-node MW/MJ thermal-energy balance. Its effective fuel, cladding, and
+coolant heat capacities and conductances are declared teaching parameters
+selected to reproduce the stated full-power equilibrium. They are not derived
+from a particular plant. Coolant inventory and transport delay, poison
+coefficients, component curves, protection delays, and setpoints remain
+illustrative unless separately documented and calibrated. Dimensional units
+and algebraic energy conservation do not establish plant validation.
+
 The thermal-hydraulics model represents ECCS injection effectiveness with a
 continuous classroom-scale response between 14 MPa, 8 MPa, and 2 MPa. These
 reference pressures illustrate increasing injection effectiveness during

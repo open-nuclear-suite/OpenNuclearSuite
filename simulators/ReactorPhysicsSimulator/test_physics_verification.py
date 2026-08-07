@@ -49,6 +49,91 @@ def positive_inhour_root(state, rho):
 
 
 class PhysicsVerificationTests(unittest.TestCase):
+    def test_dimensioned_lwr_equilibrium_and_power_scale(self):
+        settings = sim.PedagogicalSettings(kinetics_preset="Representative LWR")
+        model = sim.ReactorModel()
+        model.reset(settings)
+        model.s.source_strength = 0.0
+        initial_power = model.s.P
+        model.advance(1.0)
+        state = model.s
+        self.assertAlmostEqual(state.P, initial_power, delta=1.0e-10)
+        self.assertEqual(state.rated_power_mwth, 3000.0)
+        self.assertGreater(state.kinetics_substeps, 1)
+        self.assertEqual(state.kinetics_integrator, "RK4 with automatic substeps")
+        row = state.make_export_row()
+        self.assertAlmostEqual(row["true_power_mwth"], 3000.0, places=8)
+        self.assertAlmostEqual(row["total_heat_mwth"], 3000.0, places=8)
+        self.assertAlmostEqual(state.fuel_to_clad_heat_mw, 2910.0, places=8)
+        self.assertAlmostEqual(state.clad_to_coolant_heat_mw, 2970.0, places=8)
+        self.assertAlmostEqual(state.heat_removed_mw, 3000.0, places=8)
+        self.assertAlmostEqual(state.thermal_energy_residual_mw, 0.0, places=10)
+
+    def test_dimensioned_lwr_thermal_step_conserves_energy(self):
+        settings = sim.PedagogicalSettings(kinetics_preset="Representative LWR")
+        model = sim.ReactorModel()
+        model.reset(settings)
+        state = model.s
+        state.heatSink = 50.0
+        energy_before_mj = (
+            state.fuel_heat_capacity_mj_per_k * state.fuelT
+            + state.clad_heat_capacity_mj_per_k * state.cladT
+            + state.coolant_heat_capacity_mj_per_k * state.coolT
+        )
+        model._advance_thermal_nodes()
+        energy_after_mj = (
+            state.fuel_heat_capacity_mj_per_k * state.fuelT
+            + state.clad_heat_capacity_mj_per_k * state.cladT
+            + state.coolant_heat_capacity_mj_per_k * state.coolT
+        )
+        expected_change_mj = (
+            state.rated_power_mwth * state.Qheat - state.heat_removed_mw
+        ) * state.dt
+        self.assertAlmostEqual(energy_after_mj - energy_before_mj, expected_change_mj, places=8)
+        self.assertAlmostEqual(state.thermal_energy_residual_mw, 0.0, places=10)
+        self.assertGreater(state.coolT, 345.0)
+
+    def test_dimensioned_lwr_period_matches_inhour_solution(self):
+        settings = sim.PedagogicalSettings(kinetics_preset="Representative LWR")
+        model = sim.ReactorModel()
+        model.reset(settings)
+        state = model.s
+        state.source_strength = 0.0
+        state.xeWorth = 0.0
+        state.alpha_f = 0.0
+        state.alpha_c = 0.0
+        state.rod_pos = 50.0
+        state.rho_manual = 20.0e-5
+        state.tripHighPower = 100.0
+        state.tripHighHeat = 100.0
+        state.update_reactivity_terms()
+        expected_alpha = positive_inhour_root(state, state.rho_manual)
+        # Initialize the independently predicted positive inhour eigenmode so
+        # the comparison does not need a long settling run through all six
+        # delayed-neutron precursor timescales.
+        state.P = 1.0
+        state.C = (state.beta_i / state.Lambda) / (expected_alpha + state.lambda_i)
+        model.advance(1.0)
+        measured_alpha = math.log(state.P) / 1.0
+        self.assertAlmostEqual(measured_alpha / expected_alpha, 1.0, delta=0.002)
+
+    def test_dimensioned_lwr_scram_has_finite_rod_insertion(self):
+        settings = sim.PedagogicalSettings(kinetics_preset="Representative LWR")
+        model = sim.ReactorModel()
+        model.reset(settings)
+        state = model.s
+        initial_position = state.rod_pos
+        state.scram = True
+        model.advance(state.dt)
+        self.assertGreater(state.rod_pos, 0.0)
+        self.assertAlmostEqual(
+            state.rod_pos,
+            initial_position - state.scram_rod_speed_pct_s * state.dt,
+            places=10,
+        )
+        model.advance(1.0)
+        self.assertEqual(state.rod_pos, 0.0)
+
     def test_delayed_precursor_initialization_is_exact_equilibrium(self):
         state = sim.ReactorState()
         derivatives = (state.beta_i / state.Lambda) * state.P - state.lambda_i * state.C
