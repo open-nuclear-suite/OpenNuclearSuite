@@ -34,6 +34,7 @@ import csv
 import math
 import time
 import tkinter as tk
+import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -68,6 +69,51 @@ from matplotlib.figure import Figure
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
 SPLASH_LOGO_FILENAME = "UTM.logo.png"
 BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
+
+ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+
+We would be delighted to hear from educators, students, researchers, and other users of this software.
+
+Please consider sending us a postcard or a short thank-you email describing:
+
+• where you are using the software;
+• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
+• any comments or experiences you would like to share.
+
+Postcards may be sent to:
+
+Dean
+Faculty of Chemical and Energy Engineering
+Universiti Teknologi Malaysia
+81310 UTM Skudai
+Johor
+Malaysia
+
+Email: fcee@utm.my
+
+Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
+
+Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+
+
+def show_suite_about(parent: tk.Misc) -> None:
+    """Show the suite-wide user outreach message in a dedicated window."""
+    window = tk.Toplevel(parent)
+    window.title("About — Open Nuclear Engineering Teaching Suite")
+    window.geometry("720x650")
+    window.minsize(560, 480)
+    window.transient(parent)
+
+    text = tk.Text(window, wrap=tk.WORD, padx=24, pady=20, font=("Segoe UI", 10), relief=tk.FLAT)
+    text.pack(fill=tk.BOTH, expand=True)
+    text.insert("1.0", ABOUT_MESSAGE)
+    text.configure(state=tk.DISABLED)
+
+    actions = ttk.Frame(window, padding=(16, 10))
+    actions.pack(fill=tk.X)
+    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
+    window.focus_set()
 
 
 def find_logo_path(filename: str) -> Optional[Path]:
@@ -461,6 +507,10 @@ class LWRTeachingSimulator:
                 header, text="UTM", bg="#7d1238", fg="white",
                 font=("Segoe UI", 18, "bold"), padx=18, pady=6,
             ).pack(side=tk.RIGHT, padx=(12, 14), pady=5)
+
+        ttk.Button(header, text="ABOUT", command=lambda: show_suite_about(self.root)).pack(
+            side=tk.RIGHT, padx=(4, 0), pady=18,
+        )
 
         main = ttk.Frame(self.root, style="TFrame")
         main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
