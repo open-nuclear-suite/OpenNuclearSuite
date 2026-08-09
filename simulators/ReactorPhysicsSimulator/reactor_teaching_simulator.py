@@ -2570,20 +2570,20 @@ class ReactorTeachingSimulatorTk:
         self.last_display_refresh = time.perf_counter()
 
     def schedule_loop(self):
-        # Treat an active operator drag as a momentary hold.  This keeps the
-        # displayed transient and model time synchronized while the expensive
-        # Matplotlib redraw is deferred, then resumes automatically on release.
-        if self.model.s.running and self.active_scale is None:
+        # Keep the transient and throttled display moving throughout an
+        # operator drag.  Model-to-widget synchronization is held until the
+        # mouse releases the active scale so it cannot fight the operator.
+        if self.model.s.running:
             self.model.advance(0.20)
             self.display_dirty = True
 
         now = time.perf_counter()
         if (
             self.display_dirty
-            and self.active_scale is None
             and now - self.last_display_refresh >= self.display_refresh_interval_s
         ):
-            self.sync_controls_from_model()
+            if self.active_scale is None:
+                self.sync_controls_from_model()
             self.refresh_all()
         self.root.after(40, self.schedule_loop)
 
