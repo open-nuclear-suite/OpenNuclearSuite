@@ -47,6 +47,9 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
+import matplotlib
+
+matplotlib.use("TkAgg")
 
 try:
     from PIL import Image, ImageTk
@@ -387,6 +390,16 @@ def rod_reactivity(position_pct, advanced=False):
     return 0.010 * (integral_fraction - 0.5)
 
 
+def rod_insertion_from_withdrawn(position_pct):
+    """Convert the internal withdrawn convention to the operator-facing insertion scale."""
+    return 100.0 - clamp(float(position_pct), 0.0, 100.0)
+
+
+def rod_withdrawn_from_insertion(insertion_pct):
+    """Convert the operator-facing insertion scale to the internal convention."""
+    return 100.0 - clamp(float(insertion_pct), 0.0, 100.0)
+
+
 def differential_rod_worth_pcm_per_pct(position_pct, advanced=False):
     """Return the local slope of the selected integral rod-worth curve."""
     if not advanced:
@@ -466,6 +479,7 @@ EXPORT_COLUMNS = [
     "rho_depletion_pcm",
     "period_s",
     "rod_position_pct",
+    "rod_insertion_pct",
     "boron_ppm",
     "iodine_index",
     "xenon_index",
@@ -826,6 +840,7 @@ class ReactorState:
             "rho_depletion_pcm": 1.0e5 * (self.rho_depletion if self.pedagogical_settings.advanced_physics else 0.0),
             "period_s": "stable" if (math.isinf(self.period) or math.isnan(self.period)) else self.period,
             "rod_position_pct": self.rod_pos,
+            "rod_insertion_pct": rod_insertion_from_withdrawn(self.rod_pos),
             "boron_ppm": self.boron_ppm,
             "iodine_index": self.I,
             "xenon_index": self.Xe,
@@ -1191,7 +1206,7 @@ class ReactorModel:
             f"Total reactivity:              {s.reactivity_pcm:7.1f} pcm",
             f"rho_rod / manual / temp:        {1e5*s.rho_rods:7.1f} / {1e5*s.rho_manual:7.1f} / {1e5*s.rho_temp:7.1f} pcm",
             f"rho_boron / rho_xe:             {1e5*s.rho_boron:7.1f} / {1e5*s.rho_xe:7.1f} pcm",
-            f"Rod position:                  {s.rod_pos:7.1f} % withdrawn",
+            f"Control rod insertion:         {rod_insertion_from_withdrawn(s.rod_pos):7.1f} %",
             f"Boron concentration:            {s.boron_ppm:7.0f} ppm equivalent",
             f"Fuel / clad / coolant temp:     {s.fuelT:7.1f} / {s.cladT:7.1f} / {s.coolT:7.1f} C",
             f"Coolant flow / heat sink:       {s.coolantFlow:7.1f} / {s.heatSink:7.1f} %",
@@ -1870,7 +1885,10 @@ class ReactorTeachingSimulatorTk:
 
         y0 = 235
         step = 70
-        self.rod_scale, self.rod_value = self._add_slider("Control Rod Position (%)", y0, 0, 100, s.rod_pos, self.rod_cb)
+        self.rod_scale, self.rod_value = self._add_slider(
+            "Control Rod Insertion (%)", y0, 0, 100,
+            rod_insertion_from_withdrawn(s.rod_pos), self.rod_cb,
+        )
         self.flow_scale, self.flow_value = self._add_slider("Primary Coolant Flow (%)", y0 + step, 20, 120, s.coolantFlow, self.flow_cb)
         self.sink_scale, self.sink_value = self._add_slider("Heat Sink / Turbine Load (%)", y0 + 2 * step, 30, 120, s.heatSink, self.sink_cb)
         self.noise_scale, self.noise_value = self._add_slider("Instrumentation Noise (%)", y0 + 3 * step, 0, 8, s.noiseAmp, self.noise_cb)
@@ -2250,8 +2268,8 @@ class ReactorTeachingSimulatorTk:
         balance = "\n".join(f"{name:<24} {1.0e5 * value:+9.1f} pcm" for name, value in components)
         balance += (
             f"\n{'-' * 38}\n{'TOTAL':<24} {s.reactivity_pcm:+9.1f} pcm"
-            f"\n\nRod position             {s.rod_pos:9.2f} % withdrawn"
-            f"\nDifferential rod worth   {differential_rod_worth_pcm_per_pct(s.rod_pos, advanced):9.2f} pcm/%"
+            f"\n\nRod insertion            {rod_insertion_from_withdrawn(s.rod_pos):9.2f} %"
+            f"\nDifferential worth       {-differential_rod_worth_pcm_per_pct(s.rod_pos, advanced):9.2f} pcm/% inserted"
         )
         self.diagnostic_vars["reactivity"].set(balance)
         self.diagnostic_vars["poisons"].set(
@@ -2294,9 +2312,14 @@ class ReactorTeachingSimulatorTk:
                 self.syncing_diagnostics = False
         if hasattr(self, "rod_worth_axis"):
             positions = np.linspace(0.0, 100.0, 101)
-            integral = np.array([1.0e5 * rod_reactivity(position, advanced) for position in positions])
+            withdrawn_positions = 100.0 - positions
+            integral = np.array([
+                1.0e5 * rod_reactivity(position, advanced)
+                for position in withdrawn_positions
+            ])
             differential = np.array([
-                differential_rod_worth_pcm_per_pct(position, advanced) for position in positions
+                -differential_rod_worth_pcm_per_pct(position, advanced)
+                for position in withdrawn_positions
             ])
             axis = self.rod_worth_axis
             diff_axis = self.rod_diff_axis
@@ -2306,10 +2329,13 @@ class ReactorTeachingSimulatorTk:
             differential_line, = diff_axis.plot(
                 positions, differential, color="#a65f00", linestyle="--", label="Differential worth",
             )
-            axis.axvline(s.rod_pos, color="#8b1e1e", linewidth=1.2, label="Current position")
+            axis.axvline(
+                rod_insertion_from_withdrawn(s.rod_pos), color="#8b1e1e",
+                linewidth=1.2, label="Current insertion",
+            )
             axis.axhline(0.0, color="#777777", linewidth=0.7)
             axis.set_xlim(0.0, 100.0)
-            axis.set_xlabel("Rod bank withdrawn (%)", fontsize=8)
+            axis.set_xlabel("Rod bank inserted (%)", fontsize=8)
             axis.set_ylabel("Integral worth (pcm)", fontsize=8, color="#315b67")
             diff_axis.set_ylabel("Differential worth (pcm/%)", fontsize=8, color="#a65f00")
             axis.tick_params(labelsize=7)
@@ -2344,11 +2370,13 @@ class ReactorTeachingSimulatorTk:
             return
         s = self.model.s
         if s.fault_stuck_rod and s.stuck_rod_pos is not None:
-            label.config(text=f"{s.stuck_rod_pos:5.1f} %")
-            self.rod_scale.set(s.stuck_rod_pos)
+            insertion = rod_insertion_from_withdrawn(s.stuck_rod_pos)
+            label.config(text=f"{insertion:5.1f} %")
+            self.rod_scale.set(insertion)
             return
-        s.rod_pos = float(val)
-        label.config(text=f"{s.rod_pos:5.1f} %")
+        insertion = float(val)
+        s.rod_pos = rod_withdrawn_from_insertion(insertion)
+        label.config(text=f"{insertion:5.1f} %")
         if s.scram and s.rod_pos > 5.0:
             s.scram = False
             s.add_log("SCRAM cleared by rod withdrawal. Use RESET for a clean restart if desired.")
@@ -2448,7 +2476,10 @@ class ReactorTeachingSimulatorTk:
         if key == "fault_stuck_rod":
             if active:
                 s.stuck_rod_pos = s.rod_pos
-                s.add_log(f"FAULT ON: stuck control rod at {s.stuck_rod_pos:.1f}% withdrawn.")
+                s.add_log(
+                    "FAULT ON: stuck control rod at "
+                    f"{rod_insertion_from_withdrawn(s.stuck_rod_pos):.1f}% inserted."
+                )
             else:
                 s.stuck_rod_pos = None
                 s.add_log("FAULT OFF: stuck control rod cleared.")
@@ -2502,7 +2533,7 @@ class ReactorTeachingSimulatorTk:
         self.syncing_controls = True
         try:
             if self.active_scale is not self.rod_scale:
-                self.rod_scale.set(s.rod_pos)
+                self.rod_scale.set(rod_insertion_from_withdrawn(s.rod_pos))
             if self.active_scale is not self.flow_scale:
                 self.flow_scale.set(s.coolantFlow)
             if self.active_scale is not self.sink_scale:

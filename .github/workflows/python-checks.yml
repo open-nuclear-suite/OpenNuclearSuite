@@ -27,3 +27,12 @@ jobs:
 
       - name: Test reactor pedagogical settings
         run: python -m unittest discover -s simulators/ReactorPhysicsSimulator -p "test_*.py" -v
+
+      - name: Test thermal-hydraulics physics and properties
+        run: python -m unittest discover -s simulators/ThermalHydraulicsSimulator -p "test_*.py" -v
+
+      - name: Test hardware-panel protocol and compatibility
+        run: python -m unittest discover -s simulators/HardwareReactorControlPanel -p "test_*.py" -v
+
+      - name: Test core-loading physics
+        run: python -m unittest discover -s simulators/CoreLoadingSimulator -p "test_*.py" -v

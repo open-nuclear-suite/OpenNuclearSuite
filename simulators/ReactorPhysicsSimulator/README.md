@@ -98,6 +98,12 @@ poisons and exposure, and startup instrumentation. This keeps the normal
 operator panel uncluttered. The diagnostics are observational except for the
 external-source control, which is enabled only under Advanced core physics.
 
+The operator-facing control-rod scale reports **percent inserted**: 0% means
+fully withdrawn and 100% means fully inserted. The internal physics retains its
+withdrawn-position coordinate to preserve the established rod-worth equations.
+CSV output retains `rod_position_pct` for backward compatibility and adds
+`rod_insertion_pct` with the operator-facing convention.
+
 The BOC/MOC/EOC exposure demonstration intentionally advances one effective
 full-power day per full-power simulated second. This compression is for a
 laboratory-period demonstration and is not plant time.

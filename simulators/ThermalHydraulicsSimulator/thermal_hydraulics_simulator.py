@@ -44,6 +44,10 @@ from typing import Callable, Deque, Dict, List, Optional, TextIO, Tuple
 
 import numpy as np
 
+from steam_properties import SteamTables
+from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
+from hot_channel import HotChannelModel, HotChannelResult
+
 try:
     from PIL import Image, ImageTk
 except ImportError:
@@ -335,12 +339,20 @@ class History:
     flow: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     void: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     chf: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    hot_fuel: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    hot_clad: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    hot_outlet: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    hot_dnbr: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
 
     def as_array(self, name: str) -> np.ndarray:
         return np.array(getattr(self, name), dtype=float)
 
     def clear(self) -> None:
-        for name in ("t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "rho", "flow", "void", "chf"):
+        for name in (
+            "t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "rho",
+            "flow", "void", "chf", "hot_fuel", "hot_clad", "hot_outlet",
+            "hot_dnbr",
+        ):
             getattr(self, name).clear()
 
 
@@ -359,6 +371,16 @@ class State:
     void_fraction: float = 0.0
     boiling_regime: str = "single-phase"
     chf_ratio: float = 0.0
+    hot_peak_fuel_C: float = float("nan")
+    hot_peak_clad_C: float = float("nan")
+    hot_outlet_C: float = float("nan")
+    hot_min_dnbr: float = float("nan")
+    hot_dnbr_valid_nodes: int = 0
+    effective_eccs_fraction: float = 0.0
+    auto_eccs_demand: float = 0.0
+    break_out_fraction_s: float = 0.0
+    porv_out_fraction_s: float = 0.0
+    evaporation_out_fraction_s: float = 0.0
     P: float = field(init=False)
     M: float = field(init=False)
     trip: bool = False
@@ -375,7 +397,7 @@ class State:
         self.Ucool = self.c.Ccool * self.c.Mref * (
             self.Tc - self.c.coolant_energy_reference_C
         )
-        self.Tprz = 344.8
+        self.Tprz = 344.7915516
         self.P = self.c.Pref
         self.M = self.c.Mref
 
@@ -389,10 +411,20 @@ class State:
         self.Tcl = c.TrefClad
         self.Tc = c.TrefCool
         self.Ucool = c.Ccool * c.Mref * (self.Tc - c.coolant_energy_reference_C)
-        self.Tprz = 344.8
+        self.Tprz = 344.7915516
         self.void_fraction = 0.0
         self.boiling_regime = "single-phase"
         self.chf_ratio = 0.0
+        self.hot_peak_fuel_C = float("nan")
+        self.hot_peak_clad_C = float("nan")
+        self.hot_outlet_C = float("nan")
+        self.hot_min_dnbr = float("nan")
+        self.hot_dnbr_valid_nodes = 0
+        self.effective_eccs_fraction = 0.0
+        self.auto_eccs_demand = 0.0
+        self.break_out_fraction_s = 0.0
+        self.porv_out_fraction_s = 0.0
+        self.evaporation_out_fraction_s = 0.0
         self.P = c.Pref
         self.M = c.Mref
         self.trip = False
@@ -418,10 +450,25 @@ class LWRTeachingSimulator:
         self.root = root
         self.c = Constants()
         self.state = State(self.c)
+        self.steam_tables = SteamTables()
+        self.physics = ThermalHydraulicsEngine(self.c, self.steam_tables)
+        self.hot_channel = HotChannelModel(self.steam_tables)
+        self.hot_channel_window: Optional[tk.Toplevel] = None
+        self.hot_channel_result: Optional[HotChannelResult] = None
+        self.hot_channel_result_time = float("nan")
+        self.hot_channel_error: Optional[str] = None
+        self.hot_channel_rendered_time = float("nan")
+        self.hot_channel_update_interval_s = 0.25
+        self.hot_channel_display_interval_s = 0.25
+        self.last_hot_channel_render_wall = 0.0
+        self.hot_flux_reference_max_MW_m2 = 6.0
+        self.hot_dnbr_reference_max = 6.0
 
         self.running = False
         self.freeze_chart = False
         self.last_wall_time = time.perf_counter()
+        self.last_display_refresh_wall = 0.0
+        self.display_refresh_interval_s = 0.10
         self.after_id: str | None = None
 
         self.root.title("LWR Thermal-Hydraulics / LOCA Teaching Simulator - Python")
@@ -439,6 +486,7 @@ class LWRTeachingSimulator:
 
         self.auto_eccs_var = tk.BooleanVar(value=True)
         self.auto_trip_var = tk.BooleanVar(value=True)
+        self.hot_channel_coupling_var = tk.BooleanVar(value=True)
 
         self.demo_mode = False
         self.demo_script_var = tk.StringVar(value="SBLOCA recovery")
@@ -572,7 +620,7 @@ class LWRTeachingSimulator:
         self.ax_power = self.fig.add_subplot(311)
         self.ax_temp = self.fig.add_subplot(312)
         self.ax_press = self.fig.add_subplot(313)
-        self.fig.subplots_adjust(left=0.10, right=0.97, top=0.96, bottom=0.07, hspace=0.42)
+        self.fig.subplots_adjust(left=0.10, right=0.89, top=0.96, bottom=0.07, hspace=0.42)
 
         for ax in (self.ax_power, self.ax_temp, self.ax_press):
             ax.set_facecolor("#f6f6f6")
@@ -585,12 +633,27 @@ class LWRTeachingSimulator:
             for spine in ax.spines.values():
                 spine.set_color("white")
 
-        (self.line_pow,) = self.ax_power.plot([], [], linewidth=1.4, label="Noisy indicated power")
-        (self.line_dec,) = self.ax_power.plot([], [], linewidth=1.0, label="Decay heat")
+        self.ax_decay = self.ax_power.twinx()
+        self.ax_decay.tick_params(axis="y", colors="white")
+        self.ax_decay.yaxis.label.set_color("white")
+        self.ax_decay.spines["right"].set_color("white")
+        (self.line_pow,) = self.ax_power.plot(
+            [], [], linewidth=1.4, color="#1f77b4", label="Indicated power"
+        )
+        (self.line_dec,) = self.ax_decay.plot(
+            [], [], linewidth=1.3, color="#d62728", label="Decay heat"
+        )
         self.ax_power.set_xlabel("time (s)", color="white")
         self.ax_power.set_ylabel("Power (%)", color="white")
+        self.ax_decay.set_ylabel("Decay heat (% nominal)", color="white")
         self.ax_power.set_title("Strip chart: indicated power and decay heat", color="white")
-        self._style_legend(self.ax_power.legend(loc="upper right"))
+        self._style_legend(
+            self.ax_power.legend(
+                [self.line_pow, self.line_dec],
+                [self.line_pow.get_label(), self.line_dec.get_label()],
+                loc="upper right",
+            )
+        )
 
         (self.line_tf,) = self.ax_temp.plot([], [], linewidth=1.0, label="Fuel")
         (self.line_tcl,) = self.ax_temp.plot([], [], linewidth=1.4, label="Clad / PCT indicator")
@@ -664,6 +727,12 @@ class LWRTeachingSimulator:
         self.demo_button.grid(row=0, column=2, sticky="ew", padx=(0, 6))
         self.log_button = ttk.Button(demo_frame, text="START CSV LOG", command=self.toggle_csv_logging)
         self.log_button.grid(row=0, column=3, sticky="ew")
+        ttk.Button(
+            demo_frame, text="HOT CHANNEL", command=self.open_hot_channel
+        ).grid(row=1, column=1, columnspan=2, sticky="ew", pady=(5, 0), padx=(0, 6))
+        ttk.Button(
+            demo_frame, text="SCENARIO SUMMARY", command=self.open_scenario_summary
+        ).grid(row=1, column=3, sticky="ew", pady=(5, 0))
         demo_frame.columnconfigure(1, weight=1)
 
         ttk.Label(parent, style="Small.TLabel", textvariable=self.log_status_var).pack(anchor="w", pady=(0, 6))
@@ -700,6 +769,9 @@ class LWRTeachingSimulator:
         checks.pack(fill=tk.X, pady=(8, 4))
         ttk.Checkbutton(checks, text="Auto ECCS logic", variable=self.auto_eccs_var, command=self._sync_auto_eccs).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(checks, text="Auto reactor trip", variable=self.auto_trip_var).grid(row=0, column=1, sticky="w", padx=(35, 0))
+        ttk.Checkbutton(
+            checks, text="Couple axial hot channel", variable=self.hot_channel_coupling_var
+        ).grid(row=0, column=2, sticky="w", padx=(35, 0))
 
         lamp_frame = ttk.Frame(parent, style="Panel.TFrame")
         lamp_frame.pack(fill=tk.X, pady=(4, 8))
@@ -833,6 +905,472 @@ class LWRTeachingSimulator:
             txt = f"{val:4.0f}{unit}"
         self.value_labels[key].configure(text=txt)
 
+    # -------------------------- Hot-channel view --------------------------
+
+    def update_auto_eccs_demand(self) -> float:
+        """Update the latched automatic-ECCS demand with recovery hysteresis."""
+        s = self.state
+        if not bool(self.auto_eccs_var.get()):
+            s.auto_eccs_demand = 0.0
+            return 0.0
+
+        demand = self.clamp(s.auto_eccs_demand, 0.0, 1.0)
+        coupled = bool(self.hot_channel_coupling_var.get())
+        hot_clad = (
+            s.hot_peak_clad_C
+            if coupled and np.isfinite(s.hot_peak_clad_C) else s.Tcl
+        )
+        hot_dnbr_limit = (
+            coupled and np.isfinite(s.hot_min_dnbr) and s.hot_min_dnbr <= 1.0
+        )
+        if (s.P < 12.0 and s.M < 0.92) or max(s.Tcl, hot_clad) > 450.0:
+            demand = max(demand, 0.35)
+        if hot_dnbr_limit or (s.P < 4.5 and s.M < 1.05):
+            demand = max(demand, 0.85)
+        if s.P < 2.0 and s.M < 1.10:
+            demand = 1.0
+
+        # Safety injection stays latched throughout an active break or a
+        # depressurized recovery. It clears only after generous recovery
+        # margins, preventing threshold chatter around 105% inventory.
+        recovered = (
+            self.control_vars["break"].get() < 1.0
+            and s.P > 13.0
+            and s.M > 0.98
+            and max(s.Tcl, hot_clad) < 400.0
+            and (not np.isfinite(s.hot_min_dnbr) or s.hot_min_dnbr > 1.30)
+        )
+        if recovered:
+            demand = 0.0
+        s.auto_eccs_demand = demand
+        return demand
+
+    def effective_eccs_fraction(self) -> float:
+        """Return the pressure-adjusted manual/automatic ECCS fraction."""
+        s = self.state
+        automatic = s.auto_eccs_demand if bool(self.auto_eccs_var.get()) else 0.0
+        requested = max(self.control_vars["eccs"].get() / 100.0, automatic)
+        return self.clamp(requested * self.physics.pressure_eccs_factor(s.P), 0.0, 1.0)
+
+    def calculate_hot_channel(self) -> HotChannelResult:
+        s, c = self.state, self.c
+        heat_fraction = c.prompt_frac * s.n + float(np.sum(c.decay_lambda * s.Di))
+        pump = max(0.0, self.control_vars["pump"].get() / 100.0)
+        natural = 0.035 + 0.08 * self.clamp(s.M, 0.0, 1.0)
+        break_bypass = 1.0 - 0.35 * self.clamp(
+            self.control_vars["break"].get() / 100.0, 0.0, 1.0
+        )
+        flow_fraction = max(
+            natural, pump * math.sqrt(max(s.M, 0.02)) * break_bypass
+        )
+        eccs_effective = self.effective_eccs_fraction()
+        saturation_temperature = self.steam_tables.saturation_temperature(
+            self.clamp(s.P, 0.10, 17.50)
+        )
+        inlet_temperature = self.clamp(
+            s.Tc - 15.0 - 35.0 * eccs_effective,
+            25.0, saturation_temperature - 1.0,
+        )
+        return self.hot_channel.solve(
+            heat_fraction, self.clamp(s.P, 0.10, 17.50),
+            inlet_temperature, flow_fraction,
+        )
+
+    def update_hot_channel_state(self, result: Optional[HotChannelResult]) -> None:
+        s = self.state
+        if result is None:
+            s.hot_peak_fuel_C = float("nan")
+            s.hot_peak_clad_C = float("nan")
+            s.hot_outlet_C = float("nan")
+            s.hot_min_dnbr = float("nan")
+            s.hot_dnbr_valid_nodes = 0
+            return
+        s.hot_peak_fuel_C = float(np.nanmax(result.fuel_centerline_temperature_C))
+        s.hot_peak_clad_C = float(np.nanmax(result.clad_surface_temperature_C))
+        s.hot_outlet_C = result.outlet_temperature_C
+        s.hot_min_dnbr = result.minimum_dnbr
+        s.hot_dnbr_valid_nodes = int(np.count_nonzero(result.chf_correlation_valid))
+        if not s.trip:
+            flux_values = np.concatenate((
+                result.surface_heat_flux_W_m2 / 1.0e6,
+                result.critical_heat_flux_W_m2 / 1.0e6,
+            ))
+            finite_flux = flux_values[np.isfinite(flux_values)]
+            if finite_flux.size:
+                self.hot_flux_reference_max_MW_m2 = max(
+                    1.0, 1.10 * float(np.max(finite_flux))
+                )
+            finite_dnbr = result.dnbr[np.isfinite(result.dnbr)]
+            if finite_dnbr.size:
+                self.hot_dnbr_reference_max = min(
+                    10.0, max(3.0, 1.50 * float(np.min(finite_dnbr)))
+                )
+
+    def scenario_summary_text(self) -> str:
+        s, hist = self.state, self.state.hist
+
+        def extrema(name: str, function, fallback: float) -> float:
+            values = hist.as_array(name)
+            finite = values[np.isfinite(values)]
+            return fallback if finite.size == 0 else float(function(finite))
+
+        min_dnbr = extrema("hot_dnbr", np.min, s.hot_min_dnbr)
+        dnbr_text = "unavailable" if not np.isfinite(min_dnbr) else f"{min_dnbr:.2f}"
+        coupling = "enabled" if bool(self.hot_channel_coupling_var.get()) else "disabled"
+        return (
+            f"Scenario: {s.scenario_name}\n"
+            f"Elapsed simulation time: {s.t:.1f} s\n"
+            f"Axial-to-lumped coupling: {coupling}\n"
+            f"Peak lumped fuel temperature: {extrema('Tf', np.max, s.Tf):.1f} C\n"
+            f"Peak lumped clad temperature: {extrema('Tcl', np.max, s.Tcl):.1f} C\n"
+            f"Peak axial fuel-centre temperature: "
+            f"{extrema('hot_fuel', np.max, s.hot_peak_fuel_C):.1f} C\n"
+            f"Peak axial clad-surface temperature: "
+            f"{extrema('hot_clad', np.max, s.hot_peak_clad_C):.1f} C\n"
+            f"Minimum primary inventory: {extrema('M', np.min, 100.0 * s.M):.1f}%\n"
+            f"Minimum pressure: {extrema('P', np.min, s.P):.2f} MPa\n"
+            f"Minimum in-range W-3 DNBR: {dnbr_text}\n"
+            f"Reactor trip: {'yes' if s.trip else 'no'}\n"
+            f"Recorded timeline events: {len(self.events)}"
+        )
+
+    def open_scenario_summary(self) -> None:
+        messagebox.showinfo("Scenario summary", self.scenario_summary_text())
+
+    def open_hot_channel(self) -> None:
+        if self.hot_channel_window is not None and self.hot_channel_window.winfo_exists():
+            self.hot_channel_window.lift()
+            self.hot_channel_window.focus_force()
+            return
+
+        window = tk.Toplevel(self.root)
+        self.hot_channel_window = window
+        window.title("Representative 1-D Hot Channel")
+        window.geometry("1180x900")
+        window.minsize(900, 680)
+        window.configure(bg="#202226")
+        window.protocol("WM_DELETE_WINDOW", self.close_hot_channel)
+
+        scroll_shell = tk.Frame(window, bg="#202226")
+        scroll_shell.pack(fill=tk.BOTH, expand=True)
+        self.hot_scroll_canvas = tk.Canvas(
+            scroll_shell, bg="#202226", highlightthickness=0
+        )
+        outer_scroll = ttk.Scrollbar(
+            scroll_shell, orient=tk.VERTICAL, command=self.hot_scroll_canvas.yview
+        )
+        self.hot_scroll_canvas.configure(yscrollcommand=outer_scroll.set)
+        outer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.hot_scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        content = tk.Frame(self.hot_scroll_canvas, bg="#202226")
+        content_window = self.hot_scroll_canvas.create_window(
+            (0, 0), window=content, anchor="nw"
+        )
+
+        def update_scroll_region(_event=None) -> None:
+            self.hot_scroll_canvas.configure(
+                scrollregion=self.hot_scroll_canvas.bbox("all")
+            )
+
+        def match_content_width(event) -> None:
+            self.hot_scroll_canvas.itemconfigure(content_window, width=event.width)
+
+        def scroll_hot_window(event) -> str:
+            units = -1 if event.delta > 0 else 1
+            self.hot_scroll_canvas.yview_scroll(units * 3, "units")
+            return "break"
+
+        content.bind("<Configure>", update_scroll_region)
+        self.hot_scroll_canvas.bind("<Configure>", match_content_width)
+        window.bind("<MouseWheel>", scroll_hot_window)
+        window.bind(
+            "<Prior>", lambda _event: self.hot_scroll_canvas.yview_scroll(-1, "pages")
+        )
+        window.bind(
+            "<Next>", lambda _event: self.hot_scroll_canvas.yview_scroll(1, "pages")
+        )
+        window.bind("<Home>", lambda _event: self.hot_scroll_canvas.yview_moveto(0.0))
+        window.bind("<End>", lambda _event: self.hot_scroll_canvas.yview_moveto(1.0))
+
+        self.hot_channel_summary_var = tk.StringVar(value="Calculating hot channel...")
+        tk.Label(
+            content, textvariable=self.hot_channel_summary_var, bg="#101114",
+            fg="#f4f4f4", justify=tk.LEFT, anchor="w", wraplength=1040,
+            padx=10, pady=8, font=("Segoe UI", 10),
+        ).pack(fill=tk.X, padx=10, pady=(10, 6))
+
+        figure = Figure(figsize=(10.2, 7.5), dpi=100, facecolor="#202226")
+        self.hot_channel_ax = figure.add_subplot(311)
+        self.hot_coolant_ax = self.hot_channel_ax.twinx()
+        self.hot_channel_ax.set_facecolor("#f6f6f6")
+        self.hot_channel_ax.grid(True, alpha=0.35)
+        self.hot_channel_ax.set_ylabel("Fuel centre (degC)", color="white")
+        self.hot_coolant_ax.set_ylabel(
+            "Clad / coolant / saturation (degC)", color="white"
+        )
+        self.hot_channel_ax.set_title("Axial hot-channel temperatures", color="white")
+        self.hot_channel_ax.tick_params(axis="both", colors="white")
+        self.hot_coolant_ax.tick_params(axis="y", colors="white")
+        for spine in self.hot_channel_ax.spines.values():
+            spine.set_color("white")
+        self.hot_coolant_ax.spines["right"].set_color("white")
+        (self.hot_line_fuel,) = self.hot_channel_ax.plot(
+            [], [], color="#9467bd", linewidth=1.6, label="Fuel centre"
+        )
+        (self.hot_line_clad,) = self.hot_coolant_ax.plot(
+            [], [], color="#d62728", linewidth=1.5, label="Clad surface"
+        )
+        (self.hot_line_bulk,) = self.hot_coolant_ax.plot(
+            [], [], color="#1f77b4", linewidth=1.5, label="Bulk coolant"
+        )
+        (self.hot_line_sat,) = self.hot_coolant_ax.plot(
+            [], [], color="#2ca02c", linestyle="--", label="Saturation temperature"
+        )
+        self._style_legend(
+            self.hot_channel_ax.legend(
+                [self.hot_line_fuel, self.hot_line_clad, self.hot_line_bulk, self.hot_line_sat],
+                ["Fuel centre", "Clad surface", "Bulk coolant", "Saturation temperature"],
+                loc="best",
+            )
+        )
+
+        self.hot_flux_ax = figure.add_subplot(312, sharex=self.hot_channel_ax)
+        self.hot_dnbr_ax = self.hot_flux_ax.twinx()
+        self.hot_flux_ax.set_facecolor("#f6f6f6")
+        self.hot_flux_ax.grid(True, alpha=0.35)
+        self.hot_flux_ax.set_xlabel("Distance from channel inlet (m)", color="white")
+        self.hot_flux_ax.set_ylabel("Heat flux (MW/m2)", color="white")
+        self.hot_dnbr_ax.set_ylabel("DNBR (-)", color="white")
+        self.hot_flux_ax.set_title("Local heat flux, W-3 CHF, and DNBR", color="white")
+        self.hot_flux_ax.tick_params(axis="both", colors="white")
+        self.hot_dnbr_ax.tick_params(axis="y", colors="white")
+        for spine in self.hot_flux_ax.spines.values():
+            spine.set_color("white")
+        self.hot_dnbr_ax.spines["right"].set_color("white")
+        (self.hot_line_heat_flux,) = self.hot_flux_ax.plot(
+            [], [], color="#ff7f0e", linewidth=1.5,
+            label="Actual heat flux (fission + decay)"
+        )
+        (self.hot_line_chf,) = self.hot_flux_ax.plot(
+            [], [], color="#17becf", linewidth=1.5, label="W-3 CHF"
+        )
+        (self.hot_line_dnbr,) = self.hot_dnbr_ax.plot(
+            [], [], color="#111111", linewidth=1.4, label="DNBR"
+        )
+        self.hot_dnbr_ax.axhline(
+            1.0, color="#d62728", linestyle=":", linewidth=1.0, label="DNBR = 1"
+        )
+        self._style_legend(
+            self.hot_flux_ax.legend(
+                [self.hot_line_heat_flux, self.hot_line_chf, self.hot_line_dnbr],
+                ["Actual heat flux (fission + decay)", "W-3 CHF", "DNBR"], loc="best",
+            )
+        )
+
+        self.hot_trend_ax = figure.add_subplot(313)
+        self.hot_trend_coolant_ax = self.hot_trend_ax.twinx()
+        self.hot_trend_ax.set_facecolor("#f6f6f6")
+        self.hot_trend_ax.grid(True, alpha=0.35)
+        self.hot_trend_ax.set_xlabel("Simulation time (s)", color="white")
+        self.hot_trend_ax.set_ylabel("Peak fuel centre (degC)", color="white")
+        self.hot_trend_coolant_ax.set_ylabel("Peak clad / outlet (degC)", color="white")
+        self.hot_trend_ax.set_title(
+            "Transient hot-channel response: decay heat versus available cooling",
+            color="white",
+        )
+        self.hot_trend_ax.tick_params(axis="both", colors="white")
+        self.hot_trend_coolant_ax.tick_params(axis="y", colors="white")
+        for spine in self.hot_trend_ax.spines.values():
+            spine.set_color("white")
+        self.hot_trend_coolant_ax.spines["right"].set_color("white")
+        (self.hot_trend_fuel,) = self.hot_trend_ax.plot(
+            [], [], color="#9467bd", linewidth=1.4, label="Peak fuel centre"
+        )
+        (self.hot_trend_clad,) = self.hot_trend_coolant_ax.plot(
+            [], [], color="#d62728", linewidth=1.4, label="Peak clad surface"
+        )
+        (self.hot_trend_outlet,) = self.hot_trend_coolant_ax.plot(
+            [], [], color="#1f77b4", linewidth=1.4, label="Coolant outlet"
+        )
+        self._style_legend(
+            self.hot_trend_ax.legend(
+                [self.hot_trend_fuel, self.hot_trend_clad, self.hot_trend_outlet],
+                ["Peak fuel centre", "Peak clad surface", "Coolant outlet"],
+                loc="best",
+            )
+        )
+        figure.subplots_adjust(left=0.09, right=0.88, top=0.95, bottom=0.07, hspace=0.58)
+        self.hot_channel_canvas = FigureCanvasTkAgg(figure, master=content)
+        self.hot_channel_canvas.get_tk_widget().pack(
+            fill=tk.X, expand=False, padx=10, pady=4
+        )
+
+        table_frame = ttk.Frame(content)
+        table_frame.pack(fill=tk.X, expand=False, padx=10, pady=(4, 10))
+        columns = (
+            "node", "z", "pressure", "enthalpy", "bulk", "clad", "fuel",
+            "quality", "xe", "heat_flux", "chf", "dnbr",
+        )
+        self.hot_channel_tree = ttk.Treeview(
+            table_frame, columns=columns, show="headings", height=7
+        )
+        headings = {
+            "node": "Node", "z": "z (m)", "pressure": "P (MPa)",
+            "enthalpy": "h (kJ/kg)", "bulk": "Coolant (C)",
+            "clad": "Clad (C)", "fuel": "Fuel centre (C)", "quality": "Quality",
+            "xe": "Eq. quality", "heat_flux": "q actual (MW/m2)",
+            "chf": "W-3 CHF (MW/m2)", "dnbr": "DNBR",
+        }
+        widths = {"node": 55, "z": 75, "pressure": 85, "enthalpy": 100,
+                  "bulk": 95, "clad": 85, "fuel": 110, "quality": 85,
+                  "xe": 90, "heat_flux": 125, "chf": 125, "dnbr": 75}
+        for column in columns:
+            self.hot_channel_tree.heading(column, text=headings[column])
+            self.hot_channel_tree.column(column, width=widths[column], anchor="e")
+        y_scroll = ttk.Scrollbar(
+            table_frame, orient=tk.VERTICAL, command=self.hot_channel_tree.yview
+        )
+        x_scroll = ttk.Scrollbar(
+            table_frame, orient=tk.HORIZONTAL, command=self.hot_channel_tree.xview
+        )
+        self.hot_channel_tree.configure(
+            yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set
+        )
+        self.hot_channel_tree.grid(row=0, column=0, sticky="nsew")
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        x_scroll.grid(row=1, column=0, sticky="ew")
+        table_frame.rowconfigure(0, weight=1)
+        table_frame.columnconfigure(0, weight=1)
+        self.hot_channel_rendered_time = float("nan")
+        self.last_hot_channel_render_wall = 0.0
+        self.update_hot_channel()
+
+    def close_hot_channel(self) -> None:
+        if self.hot_channel_window is not None:
+            self.hot_channel_window.destroy()
+        self.hot_channel_window = None
+        self.hot_channel_rendered_time = float("nan")
+        self.last_hot_channel_render_wall = 0.0
+
+    def update_hot_channel(self) -> None:
+        if self.hot_channel_window is None or not self.hot_channel_window.winfo_exists():
+            return
+        render_now = time.perf_counter()
+        if (
+            self.hot_channel_rendered_time == self.hot_channel_result_time
+            or render_now - self.last_hot_channel_render_wall
+            < self.hot_channel_display_interval_s
+        ):
+            return
+        self.last_hot_channel_render_wall = render_now
+        if not np.isfinite(self.hot_channel_result_time):
+            try:
+                result = self.calculate_hot_channel()
+                self.hot_channel_result = result
+                self.hot_channel_error = None
+            except (ValueError, ArithmeticError) as error:
+                self.hot_channel_result = None
+                self.hot_channel_error = str(error)
+            self.hot_channel_result_time = self.state.t
+            self.update_hot_channel_state(self.hot_channel_result)
+
+        self.hot_channel_rendered_time = self.hot_channel_result_time
+        result = self.hot_channel_result
+        if result is None:
+            detail = self.hot_channel_error or "state is outside the axial model domain"
+            self.hot_channel_summary_var.set(
+                f"Hot-channel calculation unavailable: {detail}. "
+                "The lumped transient continues and the axial solver will retry periodically."
+            )
+            return
+        fuel_index = result.peak_fuel_index
+        clad_index = result.peak_clad_index
+        warning = f" Warning: {result.phase_warning}" if result.phase_warning else ""
+        dnbr_index = result.minimum_dnbr_index
+        if dnbr_index is None:
+            dnbr_text = "W-3 DNBR unavailable at the present conditions"
+        else:
+            dnbr_text = (
+                f"minimum in-range W-3 DNBR {result.minimum_dnbr:.2f} at "
+                f"z={result.z_m[dnbr_index]:.2f} m"
+            )
+        clad_history = self.state.hist.as_array("hot_clad")
+        finite_clad = clad_history[np.isfinite(clad_history)]
+        if finite_clad.size >= 2:
+            change = float(finite_clad[-1] - finite_clad[-2])
+            if change > 0.05:
+                trend_text = "axial peak clad is rising"
+            elif change < -0.05:
+                trend_text = "axial peak clad is falling"
+            else:
+                trend_text = "axial peak clad is approximately steady"
+        else:
+            trend_text = "axial temperature trend is not yet established"
+        self.hot_channel_summary_var.set(
+            f"{result.z_m.size}-node representative channel. Peak fuel centre "
+            f"{result.fuel_centerline_temperature_C[fuel_index]:.1f} C at "
+            f"z={result.z_m[fuel_index]:.2f} m; peak clad surface "
+            f"{result.clad_surface_temperature_C[clad_index]:.1f} C at "
+            f"z={result.z_m[clad_index]:.2f} m; outlet coolant "
+            f"{result.outlet_temperature_C:.1f} C; deposited channel power "
+            f"{result.deposited_power_W / 1000.0:.1f} kW; {dnbr_text}; "
+            f"{trend_text}.{warning}"
+        )
+        self.hot_line_fuel.set_data(result.z_m, result.fuel_centerline_temperature_C)
+        self.hot_line_clad.set_data(result.z_m, result.clad_surface_temperature_C)
+        self.hot_line_bulk.set_data(result.z_m, result.bulk_temperature_C)
+        self.hot_line_sat.set_data(result.z_m, result.saturation_temperature_C)
+        self.hot_channel_ax.relim()
+        self.hot_channel_ax.autoscale_view()
+        self.hot_coolant_ax.relim()
+        self.hot_coolant_ax.autoscale_view()
+        self.hot_line_heat_flux.set_data(result.z_m, result.surface_heat_flux_W_m2 / 1.0e6)
+        self.hot_line_chf.set_data(result.z_m, result.critical_heat_flux_W_m2 / 1.0e6)
+        self.hot_line_dnbr.set_data(result.z_m, result.dnbr)
+        if self.state.trip:
+            self.hot_flux_ax.set_ylim(0.0, self.hot_flux_reference_max_MW_m2)
+            self.hot_dnbr_ax.set_ylim(0.0, self.hot_dnbr_reference_max)
+        else:
+            self.hot_flux_ax.relim()
+            self.hot_flux_ax.autoscale_view()
+            self.hot_dnbr_ax.relim()
+            self.hot_dnbr_ax.autoscale_view()
+
+        history = self.state.hist
+        times = history.as_array("t")
+        self.hot_trend_fuel.set_data(times, history.as_array("hot_fuel"))
+        self.hot_trend_clad.set_data(times, history.as_array("hot_clad"))
+        self.hot_trend_outlet.set_data(times, history.as_array("hot_outlet"))
+        if times.size:
+            xmax = max(40.0, float(times[-1]))
+            xmin = max(0.0, xmax - 40.0)
+            self.hot_trend_ax.set_xlim(xmin, xmax)
+        self.hot_trend_ax.relim()
+        self.hot_trend_ax.autoscale_view(scalex=False)
+        self.hot_trend_coolant_ax.relim()
+        self.hot_trend_coolant_ax.autoscale_view(scalex=False)
+        self.hot_channel_canvas.draw_idle()
+
+        for item in self.hot_channel_tree.get_children():
+            self.hot_channel_tree.delete(item)
+        for index, z in enumerate(result.z_m):
+            quality = "--" if np.isnan(result.quality[index]) else f"{result.quality[index]:.4f}"
+            chf = result.critical_heat_flux_W_m2[index] / 1.0e6
+            chf_text = "--" if np.isnan(chf) else f"{chf:.3f}"
+            dnbr = result.dnbr[index]
+            dnbr_value = "--" if np.isnan(dnbr) else f"{dnbr:.3f}"
+            self.hot_channel_tree.insert("", tk.END, values=(
+                index + 1, f"{z:.3f}", f"{result.pressure_mpa[index]:.3f}",
+                f"{result.enthalpy_kj_kg[index]:.2f}",
+                f"{result.bulk_temperature_C[index]:.2f}",
+                f"{result.clad_surface_temperature_C[index]:.2f}",
+                f"{result.fuel_centerline_temperature_C[index]:.2f}", quality,
+                f"{result.equilibrium_quality[index]:.4f}",
+                f"{result.surface_heat_flux_W_m2[index] / 1.0e6:.3f}",
+                chf_text, dnbr_value,
+            ))
+
     # ----------------------------- Callbacks ------------------------------
 
     def toggle_run(self) -> None:
@@ -851,6 +1389,13 @@ class LWRTeachingSimulator:
         self.demo_stage = ""
         self.run_button.configure(text="START")
         self.state.reset()
+        self.hot_channel_result = None
+        self.hot_channel_result_time = float("nan")
+        self.hot_channel_error = None
+        self.hot_channel_rendered_time = float("nan")
+        self.last_hot_channel_render_wall = 0.0
+        self.hot_flux_reference_max_MW_m2 = 6.0
+        self.hot_dnbr_reference_max = 6.0
         self.set_slider("rod", 0)
         self.set_slider("trim", 0)
         self.set_slider("boron", 1000)
@@ -867,6 +1412,7 @@ class LWRTeachingSimulator:
         self.set_slider("speed", 5)
         self.auto_eccs_var.set(True)
         self.auto_trip_var.set(True)
+        self.hot_channel_coupling_var.set(True)
         self.state.autoECCS = True
         self.reset_event_timeline()
         self.refresh_all(force=True)
@@ -909,15 +1455,30 @@ class LWRTeachingSimulator:
 
     def _sync_auto_eccs(self) -> None:
         self.state.autoECCS = bool(self.auto_eccs_var.get())
+        if not self.state.autoECCS:
+            self.state.auto_eccs_demand = 0.0
 
     # --------------------------- Event timeline --------------------------
 
     def eccs_is_active(self) -> bool:
         s = self.state
         manual = self.control_vars["eccs"].get() > 1.0
+        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        axial_dnbr_limit = (
+            hot_coupling and np.isfinite(s.hot_min_dnbr) and s.hot_min_dnbr <= 1.0
+        )
+        axial_high_clad = (
+            hot_coupling
+            and np.isfinite(s.hot_peak_clad_C)
+            and s.hot_peak_clad_C > 450.0
+        )
         automatic = bool(self.auto_eccs_var.get()) and (
+            s.auto_eccs_demand > 0.01
+            or
             (s.P < 12.0 and s.M < 0.92)
             or s.Tcl > 450.0
+            or axial_high_clad
+            or axial_dnbr_limit
             or (s.P < 4.5 and s.M < 1.05)
             or (s.P < 2.0 and s.M < 1.10)
         )
@@ -925,13 +1486,22 @@ class LWRTeachingSimulator:
 
     def current_event_state(self) -> Dict[str, object]:
         s = self.state
+        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        axial_high_clad = (
+            hot_coupling
+            and np.isfinite(s.hot_peak_clad_C)
+            and s.hot_peak_clad_C > self.c.cladWarn
+        )
+        axial_dnbr_limit = (
+            hot_coupling and np.isfinite(s.hot_min_dnbr) and s.hot_min_dnbr <= 1.0
+        )
         return {
             "scenario": s.scenario_name,
             "trip": s.trip,
             "eccs": self.eccs_is_active(),
             "low_inventory": s.M < self.c.invLow,
-            "high_clad": s.Tcl > self.c.cladWarn,
-            "chf": s.chf_ratio >= 1.0,
+            "high_clad": s.Tcl > self.c.cladWarn or axial_high_clad,
+            "chf": s.chf_ratio >= 1.0 or axial_dnbr_limit,
             "regime": s.boiling_regime,
         }
 
@@ -1221,6 +1791,10 @@ class LWRTeachingSimulator:
             "rod_percent", "trim_pcm", "boron_ppm", "pump_percent", "sg_percent",
             "break_percent", "eccs_percent", "afw_percent", "porv_percent", "spray_percent",
             "heater_percent", "rhr_percent",
+            "hot_channel_coupled", "hot_peak_fuel_C", "hot_peak_clad_C",
+            "hot_outlet_C", "hot_min_dnbr", "hot_dnbr_valid_nodes",
+            "effective_eccs_percent", "break_out_inventory_fraction_s",
+            "porv_out_inventory_fraction_s", "evaporation_out_inventory_fraction_s",
         ]
 
     def write_csv_row(self, indicated_power: float, decay_frac_now: float, rho_total: float, flow_eff: float) -> None:
@@ -1242,6 +1816,12 @@ class LWRTeachingSimulator:
             f"{self.control_vars['eccs'].get():.5g}", f"{self.control_vars['afw'].get():.5g}",
             f"{self.control_vars['porv'].get():.5g}", f"{self.control_vars['spray'].get():.5g}",
             f"{self.control_vars['heater'].get():.5g}", f"{self.control_vars['rhr'].get():.5g}",
+            int(self.hot_channel_coupling_var.get()),
+            f"{s.hot_peak_fuel_C:.5g}", f"{s.hot_peak_clad_C:.5g}",
+            f"{s.hot_outlet_C:.5g}", f"{s.hot_min_dnbr:.5g}",
+            s.hot_dnbr_valid_nodes, f"{100.0 * s.effective_eccs_fraction:.5g}",
+            f"{s.break_out_fraction_s:.5g}", f"{s.porv_out_fraction_s:.5g}",
+            f"{s.evaporation_out_fraction_s:.5g}",
         ]
         self.csv_writer.writerow(row)
         if int(s.t * 10) % 20 == 0:
@@ -1267,6 +1847,7 @@ class LWRTeachingSimulator:
         self.auto_eccs_var.set(True)
         self.auto_trip_var.set(True)
         self.state.autoECCS = True
+        self.state.auto_eccs_demand = 0.0
         self.refresh_all(force=False)
 
     def scenario_sbloc(self) -> None:
@@ -1373,7 +1954,13 @@ class LWRTeachingSimulator:
                 for _ in range(nsub):
                     self.apply_demo_mode()
                     self.step_model(dt)
-                self.refresh_all(force=False)
+                refresh_now = time.perf_counter()
+                if (
+                    refresh_now - self.last_display_refresh_wall
+                    >= self.display_refresh_interval_s
+                ):
+                    self.refresh_all(force=False)
+                    self.last_display_refresh_wall = refresh_now
             else:
                 self.last_wall_time = time.perf_counter()
         finally:
@@ -1398,24 +1985,11 @@ class LWRTeachingSimulator:
             f = 1.0
         return self.clamp(f, 0.05, 1.0)
 
-    @staticmethod
-    def saturation_temperature(P: float) -> float:
-        """Approximate water saturation temperature in degC from pressure.
+    def saturation_temperature(self, pressure_mpa: float) -> float:
+        return self.steam_tables.saturation_temperature(pressure_mpa)
 
-        The table is intentionally compact and is only used to put boiling,
-        condensation, and pressurizer response on a mutually consistent curve.
-        It is not a substitute for validated steam tables.
-        """
-        pressures = np.array([0.10, 0.50, 1.0, 2.0, 4.0, 8.0, 12.0, 15.5, 17.5])
-        temperatures = np.array([99.6, 151.8, 179.9, 212.4, 250.4, 295.0, 324.7, 344.8, 355.0])
-        return float(np.interp(P, pressures, temperatures))
-
-    @staticmethod
-    def saturation_pressure(T: float) -> float:
-        """Inverse of :meth:`saturation_temperature`, returning MPa."""
-        temperatures = np.array([99.6, 151.8, 179.9, 212.4, 250.4, 295.0, 324.7, 344.8, 355.0])
-        pressures = np.array([0.10, 0.50, 1.0, 2.0, 4.0, 8.0, 12.0, 15.5, 17.5])
-        return float(np.interp(T, temperatures, pressures))
+    def saturation_pressure(self, temperature_C: float) -> float:
+        return self.steam_tables.saturation_pressure(temperature_C)
 
     def boiling_heat_transfer(
         self, flow_eff: float, coverage: float
@@ -1457,6 +2031,89 @@ class LWRTeachingSimulator:
         return conductance, boiling_demand, regime, chf_ratio
 
     def step_model(self, dt: float) -> None:
+        """Advance the GUI-independent physics engine by one RK4 step."""
+        s = self.state
+        self.update_auto_eccs_demand()
+        cache_age = s.t - self.hot_channel_result_time
+        if (
+            not np.isfinite(cache_age)
+            or cache_age >= getattr(self, "hot_channel_update_interval_s", 0.25) - 1.0e-12
+        ):
+            try:
+                hot_result = self.calculate_hot_channel()
+                self.hot_channel_error = None
+            except (ValueError, ArithmeticError) as error:
+                hot_result = None
+                self.hot_channel_error = str(error)
+            self.hot_channel_result = hot_result
+            self.hot_channel_result_time = s.t
+        else:
+            hot_result = self.hot_channel_result
+        self.update_hot_channel_state(hot_result)
+
+        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        thermal_limit_temperature = max(
+            s.Tcl,
+            s.hot_peak_clad_C if np.isfinite(s.hot_peak_clad_C) else s.Tcl,
+        )
+        dnbr_trip = (
+            hot_coupling
+            and np.isfinite(s.hot_min_dnbr)
+            and s.hot_min_dnbr <= 1.0
+        )
+        if bool(self.auto_trip_var.get()) and (
+            s.n > 1.18 or s.P > self.c.pressHigh or s.M < 0.82
+            or (hot_coupling and thermal_limit_temperature > self.c.cladWarn)
+            or dnbr_trip
+        ):
+            s.trip = True
+
+        rod_pct = self.control_vars["rod"].get()
+        trim_pcm = self.control_vars["trim"].get()
+        if s.trip:
+            rod_pct = 100.0
+            trim_pcm = min(trim_pcm, 0.0)
+
+        controls = ControlInputs(
+            rod_pct=rod_pct,
+            trim_pcm=trim_pcm,
+            boron_ppm=self.control_vars["boron"].get(),
+            pump_pct=self.control_vars["pump"].get(),
+            sg_pct=self.control_vars["sg"].get(),
+            break_pct=self.control_vars["break"].get(),
+            eccs_pct=self.control_vars["eccs"].get(),
+            afw_pct=self.control_vars["afw"].get(),
+            porv_pct=self.control_vars["porv"].get(),
+            spray_pct=self.control_vars["spray"].get(),
+            heater_pct=self.control_vars["heater"].get(),
+            rhr_pct=self.control_vars["rhr"].get(),
+            auto_eccs=bool(self.auto_eccs_var.get()),
+            auto_eccs_demand=s.auto_eccs_demand,
+            hot_channel_coupling=hot_coupling,
+            hot_channel_peak_clad_C=s.hot_peak_clad_C,
+            hot_channel_min_dnbr=s.hot_min_dnbr,
+        )
+        diagnostics = self.physics.step(s, controls, dt)
+        s.autoECCS = controls.auto_eccs
+        s.effective_eccs_fraction = diagnostics.eccs_fraction
+        s.break_out_fraction_s = diagnostics.break_out
+        s.porv_out_fraction_s = diagnostics.porv_out
+        s.evaporation_out_fraction_s = diagnostics.evaporation_out
+
+        # Discrete controls and observability are applied once after all four
+        # RK stages; intermediate stages never mutate Tk variables or history.
+        if s.trip:
+            self.set_slider("rod", 100.0)
+            self.set_slider("trim", trim_pcm)
+        self.detect_timeline_events()
+        self.append_history(
+            diagnostics.decay_fraction,
+            diagnostics.rho_total,
+            diagnostics.flow_effective,
+        )
+
+    def _step_model_euler_reference(self, dt: float) -> None:
+        """Retained temporarily as an equation-by-equation migration reference."""
         c = self.c
         s = self.state
 
@@ -1659,6 +2316,10 @@ class LWRTeachingSimulator:
         hist.flow.append(100.0 * flow_eff)
         hist.void.append(100.0 * s.void_fraction)
         hist.chf.append(s.chf_ratio)
+        hist.hot_fuel.append(s.hot_peak_fuel_C)
+        hist.hot_clad.append(s.hot_peak_clad_C)
+        hist.hot_outlet.append(s.hot_outlet_C)
+        hist.hot_dnbr.append(s.hot_min_dnbr)
 
         self.write_csv_row(indicated_power, decay_frac_now, rho_total, flow_eff)
 
@@ -1668,6 +2329,7 @@ class LWRTeachingSimulator:
         if force or not self.freeze_chart:
             self.update_plots()
         self.update_readouts()
+        self.update_hot_channel()
 
     @staticmethod
     def nanmax(v: np.ndarray, default: float = 1.0) -> float:
@@ -1687,8 +2349,9 @@ class LWRTeachingSimulator:
         if len(hist.t) < 2:
             for line in (self.line_pow, self.line_dec, self.line_tf, self.line_tcl, self.line_tc, self.line_p, self.line_m):
                 line.set_data([], [])
-            for ax in (self.ax_power, self.ax_temp, self.ax_press):
+            for ax in (self.ax_power, self.ax_decay, self.ax_temp, self.ax_press):
                 ax.set_xlim(0.0, visible_window_s)
+            self.ax_decay.set_ylim(0.0, 8.0)
             self.canvas.draw_idle()
             return
 
@@ -1703,9 +2366,15 @@ class LWRTeachingSimulator:
         dec_y = hist.as_array("dec")
         self.line_pow.set_data(x, pow_y)
         self.line_dec.set_data(x, dec_y)
-        y_max_power = max(120.0, 1.15 * self.nanmax(np.concatenate([pow_y, dec_y, np.array([110.0])]), 120.0))
+        y_max_power = max(120.0, 1.15 * self.nanmax(np.concatenate([pow_y, np.array([110.0])]), 120.0))
         self.ax_power.set_xlim(xmin, xmax)
         self.ax_power.set_ylim(0.0, y_max_power)
+        y_max_decay = max(
+            8.0,
+            1.15 * self.nanmax(np.concatenate([dec_y, np.array([7.0])]), 8.0),
+        )
+        self.ax_decay.set_xlim(xmin, xmax)
+        self.ax_decay.set_ylim(0.0, y_max_decay)
 
         Tf_y = hist.as_array("Tf")
         Tcl_y = hist.as_array("Tcl")
@@ -1751,10 +2420,19 @@ class LWRTeachingSimulator:
         self.set_lamp("REACTOR TRIP", s.trip)
         self.set_lamp("ECCS ACTIVE", eccs_on)
         self.set_lamp("LOW INVENTORY", s.M < self.c.invLow)
-        self.set_lamp("HIGH CLAD TEMP", s.Tcl > self.c.cladWarn)
+        axial_high_clad = (
+            bool(self.hot_channel_coupling_var.get())
+            and np.isfinite(s.hot_peak_clad_C)
+            and s.hot_peak_clad_C > self.c.cladWarn
+        )
+        self.set_lamp("HIGH CLAD TEMP", s.Tcl > self.c.cladWarn or axial_high_clad)
 
-        if s.Tcl > self.c.cladTrip:
+        if s.Tcl > self.c.cladTrip or (
+            axial_high_clad and s.hot_peak_clad_C > self.c.cladTrip
+        ):
             alarm = "SEVERE: cladding temperature above teaching limit. Discuss core uncovery and emergency cooling."
+        elif axial_high_clad:
+            alarm = "WARNING: representative hot-channel cladding exceeds the teaching warning limit."
         elif s.M < self.c.invLow:
             alarm = "WARNING: low primary inventory. Heat transfer is degrading; observe PCT response."
         elif s.P > self.c.pressHigh:
@@ -1770,6 +2448,8 @@ class LWRTeachingSimulator:
             f" | Heat transfer: {s.boiling_regime}, void {100.0 * s.void_fraction:.0f}%, "
             f"CHF ratio {s.chf_ratio:.2f}"
         )
+        if np.isfinite(s.hot_min_dnbr):
+            boiling_text += f", axial MDNBR {s.hot_min_dnbr:.2f}"
         self.status_var.set(
             f"t = {s.t:.1f} s | Scenario: {s.scenario_name}{demo_text}{log_text}"
             f"{boiling_text} | {alarm}"

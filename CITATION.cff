@@ -2,6 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "Open Nuclear Engineering Teaching Suite"
 type: software
+version: 1.3.0
+date-released: 2026-08-18
 authors:
   - family-names: "Sies"
     given-names: "Mohsin Mohd"

@@ -49,6 +49,17 @@ def positive_inhour_root(state, rho):
 
 
 class PhysicsVerificationTests(unittest.TestCase):
+    def test_operator_rod_insertion_scale_is_inverse_of_internal_withdrawal(self):
+        self.assertEqual(sim.rod_insertion_from_withdrawn(0.0), 100.0)
+        self.assertEqual(sim.rod_insertion_from_withdrawn(100.0), 0.0)
+        self.assertEqual(sim.rod_withdrawn_from_insertion(100.0), 0.0)
+        self.assertEqual(sim.rod_withdrawn_from_insertion(0.0), 100.0)
+        fully_inserted = sim.rod_withdrawn_from_insertion(100.0)
+        fully_withdrawn = sim.rod_withdrawn_from_insertion(0.0)
+        self.assertLess(
+            sim.rod_reactivity(fully_inserted), sim.rod_reactivity(fully_withdrawn)
+        )
+
     def test_dimensioned_lwr_equilibrium_and_power_scale(self):
         settings = sim.PedagogicalSettings(kinetics_preset="Representative LWR")
         model = sim.ReactorModel()

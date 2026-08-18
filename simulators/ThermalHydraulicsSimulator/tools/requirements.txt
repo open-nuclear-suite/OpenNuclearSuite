@@ -1,0 +1,2 @@
+# Generation-only dependency; not required to run the simulator.
+CoolProp==8.0.0
