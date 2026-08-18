@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import unittest
 from collections import deque
+import csv
+import io
+import math
 
 from thermal_hydraulics_simulator import (
     BANNER_LOGO_FILENAME,
@@ -13,6 +16,9 @@ from thermal_hydraulics_simulator import (
     State,
     find_logo_path,
 )
+from steam_properties import SteamTables
+from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
+from hot_channel import HotChannelModel
 
 
 class FakeVar:
@@ -31,6 +37,11 @@ def make_model(**overrides: float) -> LWRTeachingSimulator:
     model = LWRTeachingSimulator.__new__(LWRTeachingSimulator)
     model.c = Constants()
     model.state = State(model.c)
+    model.steam_tables = SteamTables()
+    model.physics = ThermalHydraulicsEngine(model.c, model.steam_tables)
+    model.hot_channel = HotChannelModel(model.steam_tables)
+    model.hot_channel_result = None
+    model.hot_channel_result_time = float("nan")
     controls = {
         "rod": 0.0, "trim": 0.0, "boron": 1000.0, "pump": 100.0,
         "sg": 100.0, "break": 0.0, "eccs": 0.0, "afw": 0.0,
@@ -41,6 +52,7 @@ def make_model(**overrides: float) -> LWRTeachingSimulator:
     model.control_vars = {key: FakeVar(value) for key, value in controls.items()}
     model.auto_trip_var = FakeVar(True)
     model.auto_eccs_var = FakeVar(True)
+    model.hot_channel_coupling_var = FakeVar(True)
     model.set_slider = lambda key, value: model.control_vars[key].set(value)
     model.append_history = lambda *_args: None
     model.events = deque(maxlen=250)
@@ -120,6 +132,128 @@ class ThermalHydraulicsPhysicsTests(unittest.TestCase):
         model.set_scenario("Small-break LOCA")
         self.assertEqual(model.events[-1].category, "SCENARIO")
         self.assertEqual(model.events[-1].message, "Selected Small-break LOCA")
+
+    def test_rk4_solution_converges_under_timestep_refinement(self) -> None:
+        results = []
+        for dt in (0.20, 0.10, 0.025):
+            model = make_model(trim=50.0)
+            model.auto_trip_var.set(False)
+            model.auto_eccs_var.set(False)
+            advance(model, 10.0, dt)
+            results.append(model.state.n)
+        coarse_error = abs(results[0] - results[2])
+        fine_error = abs(results[1] - results[2])
+        self.assertLess(fine_error, coarse_error / 8.0)
+
+    def test_existing_accident_scenarios_remain_bounded_and_trip(self) -> None:
+        scenarios = {
+            "SBLOCA": {"pump": 60.0, "break": 12.0},
+            "LBLOCA": {"pump": 0.0, "sg": 60.0, "break": 70.0},
+            "LOFA": {"pump": 0.0},
+            "LOHS": {"pump": 80.0, "sg": 0.0},
+            "SBO": {"pump": 0.0, "sg": 8.0},
+        }
+        for name, controls in scenarios.items():
+            with self.subTest(scenario=name):
+                model = make_model(**controls)
+                advance(model, 60.0)
+                state = model.state
+                self.assertTrue(state.trip)
+                self.assertTrue(all(math.isfinite(value) for value in (
+                    state.n, state.Tf, state.Tcl, state.Tc, state.P, state.M,
+                    state.void_fraction, state.chf_ratio,
+                )))
+                self.assertGreaterEqual(state.M, 0.05)
+                self.assertLessEqual(state.M, 1.20)
+                self.assertGreaterEqual(state.P, 0.10)
+                self.assertLessEqual(state.P, 17.50 + 1.0e-9)
+
+    def test_axial_feedback_can_raise_lumped_chf_demand(self) -> None:
+        model = make_model()
+        vector = model.physics.pack(model.state)
+        _, uncoupled = model.physics.rhs(0.0, vector, ControlInputs())
+        _, coupled = model.physics.rhs(
+            0.0, vector,
+            ControlInputs(
+                hot_channel_coupling=True,
+                hot_channel_peak_clad_C=500.0,
+                hot_channel_min_dnbr=0.80,
+            ),
+        )
+        self.assertLess(uncoupled.chf_ratio, 1.0)
+        self.assertGreaterEqual(coupled.chf_ratio, 1.25)
+        self.assertGreaterEqual(coupled.eccs_fraction, 0.85)
+
+    def test_eccs_and_break_conditions_reach_axial_channel(self) -> None:
+        nominal = make_model()
+        eccs = make_model(eccs=100.0)
+        eccs.auto_eccs_var.set(False)
+        loca = make_model(**{"break": 70.0})
+        nominal_result = nominal.calculate_hot_channel()
+        eccs_result = eccs.calculate_hot_channel()
+        loca_result = loca.calculate_hot_channel()
+        self.assertLess(
+            eccs_result.bulk_temperature_C[0], nominal_result.bulk_temperature_C[0]
+        )
+        self.assertGreater(loca_result.outlet_temperature_C, nominal_result.outlet_temperature_C)
+
+    def test_step_publishes_axial_metrics_for_summaries_and_logging(self) -> None:
+        model = make_model()
+        model.step_model(0.05)
+        self.assertTrue(math.isfinite(model.state.hot_peak_fuel_C))
+        self.assertTrue(math.isfinite(model.state.hot_peak_clad_C))
+        self.assertGreater(model.state.hot_dnbr_valid_nodes, 0)
+
+        output = io.StringIO()
+        model.csv_logging = True
+        model.csv_file = output
+        model.csv_writer = csv.writer(output)
+        model.csv_last_logged_t = -1.0e9
+        model.csv_log_interval = 0.0
+        model.demo_stage = ""
+        model.csv_writer.writerow(model.csv_header())
+        model.write_csv_row(100.0, 0.065, 0.0, 1.0)
+        rows = list(csv.reader(io.StringIO(output.getvalue())))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows[0]), len(rows[1]))
+        self.assertIn("hot_min_dnbr", rows[0])
+        self.assertIn("effective_eccs_percent", rows[0])
+        summary = model.scenario_summary_text()
+        self.assertIn("Axial-to-lumped coupling: enabled", summary)
+        self.assertIn("Minimum in-range W-3 DNBR", summary)
+
+    def test_failed_hot_channel_solves_are_rate_limited(self) -> None:
+        model = make_model()
+        calls = 0
+
+        def unavailable():
+            nonlocal calls
+            calls += 1
+            raise ValueError("deliberate out-of-domain state")
+
+        model.calculate_hot_channel = unavailable
+        model.hot_channel_result = None
+        model.hot_channel_result_time = float("nan")
+        for _ in range(20):
+            model.step_model(0.05)
+        self.assertLessEqual(calls, 4)
+        self.assertEqual(model.hot_channel_error, "deliberate out-of-domain state")
+
+    def test_auto_eccs_demand_latches_during_active_loca(self) -> None:
+        model = make_model(**{"break": 12.0})
+        model.state.P = 4.0
+        model.state.M = 1.00
+        self.assertEqual(model.update_auto_eccs_demand(), 0.85)
+        model.state.P = 5.0
+        model.state.M = 1.06
+        self.assertEqual(model.update_auto_eccs_demand(), 0.85)
+        model.control_vars["break"].set(0.0)
+        model.state.P = 15.5
+        model.state.M = 1.00
+        model.state.Tcl = 335.0
+        model.state.hot_peak_clad_C = 360.0
+        model.state.hot_min_dnbr = 4.0
+        self.assertEqual(model.update_auto_eccs_demand(), 0.0)
 
 
 if __name__ == "__main__":

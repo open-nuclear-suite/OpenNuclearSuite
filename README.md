@@ -1,6 +1,7 @@
 # Open Nuclear Engineering Teaching Suite
 
-A collection of three interactive desktop simulators for teaching introductory
+A collection of three interactive desktop simulators plus an optional hardware
+control-panel edition for teaching introductory
 reactor physics, core loading, and light-water-reactor thermal-hydraulics. The applications use
 Python, Tkinter, NumPy, and Matplotlib.
 
@@ -14,6 +15,7 @@ Python, Tkinter, NumPy, and Matplotlib.
 | Simulator | Topics | Entry point |
 | --- | --- | --- |
 | Reactor Physics and Kinetics | Point kinetics, reactivity balance, nonlinear rod worth, Xe/Sm poisoning, source-range startup, feedback, teaching-cycle exposure, load following, trips, and fault injection | `simulators/ReactorPhysicsSimulator/main.py` |
+| Hardware Reactor Control Panel | Separate USB-serial integration edition for a student-built physical teaching panel; reuses the reactor physics model | `simulators/HardwareReactorControlPanel/main.py` |
 | Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/ThermalHydraulicsSimulator/main.py` |
 | Core Loading Simulator | 11 x 11 loading patterns, two-group diffusion, burnup, fuel management, assembly histories, and guided multi-cycle refueling | `simulators/CoreLoadingSimulator/main.py` |
 
@@ -89,6 +91,22 @@ After setup, Windows users can instead double-click
 `run_reactor_simulator.bat`, `run_thermal_hydraulics_simulator.bat`, or
 `run_core_loading_simulator.bat`.
 
+The optional physical-panel edition has its own dependency and launcher:
+
+> [!CAUTION]
+> **The suggested physical hardware build and reference firmware have not been
+> assembled, commissioned, or tested by this project.** Treat them only as an
+> unverified student-project proposal. Never connect them to real reactor,
+> laboratory, process-control, protection, or safety equipment.
+
+```cmd
+python -m pip install -r simulators\HardwareReactorControlPanel\requirements-hardware.txt
+run_hardware_reactor_simulator.bat --no-hardware
+```
+
+See the [hardware panel build guide](simulators/HardwareReactorControlPanel/PHYSICAL_PANEL_BUILD_GUIDE.md)
+before constructing or connecting a mockup.
+
 The applications are independent; close one before launching the other if
 screen space or system memory is limited.
 
@@ -100,8 +118,9 @@ From PowerShell on Windows, run:
 .\build_standalone_windows.ps1
 ```
 
-The script creates one-file, windowed executables for all three simulators under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows`. The release
+The script creates one-file, windowed executables for the three simulators and
+the explicitly labelled untested hardware-panel edition under
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.3.0-Windows`. The release
 also includes the license, citation metadata, Windows instructions, and
 SHA-256 checksums. End users do not need Python installed.
 
@@ -112,7 +131,7 @@ For faster startup, build folder-based editions instead:
 ```
 
 These are created under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.2.0-Windows-Onedir`.
+`release\Open-Nuclear-Engineering-Teaching-Suite-1.3.0-Windows-Onedir`.
 Each simulator's executable must remain beside its `_internal` folder, but it
 starts faster because bundled components do not need to be unpacked on every
 launch. The build also creates a ZIP of the complete folder-based release for

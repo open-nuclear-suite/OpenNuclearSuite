@@ -1,11 +1,17 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.2.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.3.0
 Windows standalone release
 
-This folder contains three independent Windows desktop applications:
+This folder contains three independent simulators and one optional hardware-panel edition:
 
   Reactor-Physics-and-Kinetics-Simulator.exe
   Thermal-Hydraulics-and-LOCA-Simulator.exe
   Core-Loading-Simulator.exe
+  Hardware-Reactor-Control-Panel-UNTESTED.exe
+
+WARNING - UNTESTED HARDWARE PROTOTYPE
+The suggested physical panel, wiring, and reference firmware have not been
+assembled, commissioned, or tested by this project. Never connect them to real
+reactor, laboratory, process-control, protection, or safety equipment.
 
 Double-click either executable to start it. Python is not required.
 The first launch can take several seconds while the one-file application

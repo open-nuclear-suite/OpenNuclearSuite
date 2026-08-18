@@ -66,6 +66,37 @@ critical-flow, CHF/DNB, reflood, or component models. The single primary volume
 cannot reproduce loop seals, counter-current flow, spatial core uncovery,
 break-location effects, or multidimensional behavior.
 
+Water and steam property queries use a bundled pressure-enthalpy table generated
+from IAPWS-IF97 over 0.1--20 MPa and 100--3600 kJ/kg. Bilinear interpolation is
+used in single-phase regions and saturation-endpoint mixture relations are used
+inside the two-phase dome. This is a compact educational lookup implementation,
+not the full spline-based IAPWS SBTL method. Standard-based property values do
+not validate the simulator's lumped component, break-flow, boiling, CHF, ECCS,
+or pressurizer models.
+
+The optional representative hot-channel diagnostic is a one-dimensional,
+single-channel reduced-order calculation with a prescribed chopped-sine axial power
+shape and declared PWR-like geometry. It marches pressure and bulk enthalpy and
+uses fixed effective fuel, gap, cladding, and coolant heat-transfer parameters.
+Its axial temperature profile is recalculated quasi-steadily and does not carry
+separate fuel/cladding thermal-capacitance states at every axial node. The trend
+display therefore shows successive boundary-condition snapshots, not a resolved
+axial heat-storage or reflood transient.
+It does not model subchannel crossflow or mixing, grid-spacer effects, lateral
+conduction, detailed fuel-temperature-dependent conductivity, local flow-regime
+closures, or reflood. When enabled, its feedback to the lumped transient is
+limited to held thermal-limit signals: peak axial cladding temperature and
+minimum valid DNBR can actuate the teaching trip/ECCS logic and strengthen the
+lumped post-CHF heat-transfer degradation. This is not a conservative safety
+system model or a replacement for coupled conservation equations. Its optional Tong W-3
+CHF/DNBR calculation is evaluated only inside the correlation's published
+pressure, mass-flux, equilibrium-quality, and hydraulic-diameter ranges; other
+nodes are explicitly marked unavailable. The implementation uses the
+uniform-flux form and does not include non-uniform-flux, spacer-grid,
+heated-perimeter, bundle-specific, uncertainty, or statistical design-limit
+corrections. Axial temperatures, equilibrium quality, CHF, and DNBR are teaching
+trends, not safety limits or predictions for a specific fuel assembly.
+
 ## Classroom practice
 
 Instructors should identify the assumptions relevant to each exercise, restore

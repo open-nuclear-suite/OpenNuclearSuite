@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.2.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.3.0
 Windows faster-starting folder release
 
 Each simulator has its own folder. Open the appropriate folder and run:
@@ -11,6 +11,14 @@ Each simulator has its own folder. Open the appropriate folder and run:
 
   Core-Loading-Simulator\
     Core-Loading-Simulator.exe
+
+  Hardware-Reactor-Control-Panel-UNTESTED\
+    Hardware-Reactor-Control-Panel-UNTESTED.exe
+
+WARNING - UNTESTED HARDWARE PROTOTYPE
+The suggested physical panel, wiring, and reference firmware have not been
+assembled, commissioned, or tested by this project. Never connect them to real
+reactor, laboratory, process-control, protection, or safety equipment.
 
 Keep each EXE together with its adjacent _internal folder. The applications
 will not run if an EXE is copied out by itself. Python is not required.
