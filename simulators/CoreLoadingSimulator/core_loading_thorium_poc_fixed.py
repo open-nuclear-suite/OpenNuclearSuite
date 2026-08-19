@@ -1232,7 +1232,7 @@ class CoreLoadingApp:
         self.root = root
         self.root.title(MODULE_NAME)
         self.root.geometry("1510x900")
-        self.root.minsize(1280, 820)
+        self.root.minsize(900, 700)
         self.root.configure(bg="#0f1115")
 
         self.model = CoreModel()
@@ -1308,17 +1308,19 @@ class CoreLoadingApp:
             row=0, column=1, sticky="e", padx=(18, 0),
         )
 
-        body = ttk.Frame(self.root)
+        body = tk.PanedWindow(
+            self.root, orient=tk.HORIZONTAL, bg="#56616d", bd=0,
+            sashwidth=8, sashrelief=tk.RAISED, showhandle=True,
+        )
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 16))
-        body.grid_columnconfigure(1, weight=1)
-        body.grid_rowconfigure(0, weight=1)
 
         left_shell = ttk.Frame(body, style="Panel.TFrame")
         centre = ttk.Frame(body, style="Panel.TFrame", padding=10)
         right_shell = ttk.Frame(body, style="Panel.TFrame")
-        left_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        centre.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
-        right_shell.grid(row=0, column=2, sticky="nsew")
+        body.add(left_shell, minsize=210, width=300, stretch="never")
+        body.add(centre, minsize=260, width=570, stretch="always")
+        body.add(right_shell, minsize=260, width=600, stretch="always")
+        self.main_panes = body
 
         left = self._make_scrollable_left_panel(left_shell)
         right = self._make_scrollable_right_panel(right_shell)
@@ -1505,11 +1507,24 @@ class CoreLoadingApp:
 
         canvas_width = GRID_SIZE * CELL_SIZE + 30
         canvas_height = GRID_SIZE * CELL_SIZE + 30
+        map_frame = ttk.Frame(parent, style="Panel.TFrame")
+        map_frame.pack(fill=tk.BOTH, expand=True)
+        map_frame.grid_rowconfigure(0, weight=1)
+        map_frame.grid_columnconfigure(0, weight=1)
+
         self.core_canvas = tk.Canvas(
-            parent, width=canvas_width, height=canvas_height,
+            map_frame, width=canvas_width, height=canvas_height,
             bg="#090c10", highlightbackground="#56616d", highlightthickness=1,
+            scrollregion=(0, 0, canvas_width, canvas_height),
         )
-        self.core_canvas.pack(expand=True)
+        core_vscroll = ttk.Scrollbar(map_frame, orient=tk.VERTICAL, command=self.core_canvas.yview)
+        core_hscroll = ttk.Scrollbar(map_frame, orient=tk.HORIZONTAL, command=self.core_canvas.xview)
+        self.core_canvas.configure(
+            xscrollcommand=core_hscroll.set, yscrollcommand=core_vscroll.set,
+        )
+        self.core_canvas.grid(row=0, column=0, sticky="nsew")
+        core_vscroll.grid(row=0, column=1, sticky="ns")
+        core_hscroll.grid(row=1, column=0, sticky="ew")
         self.core_canvas.bind("<Button-1>", self.on_core_click)
         self.core_canvas.bind("<Shift-Button-1>", self.on_core_select)
         self.core_canvas.bind("<Button-3>", self.on_core_right_click)
@@ -1615,8 +1630,10 @@ class CoreLoadingApp:
         )
 
     def _canvas_cell(self, event: tk.Event) -> Optional[Tuple[int, int]]:
-        col = int((event.x - 15) // CELL_SIZE)
-        row = int((event.y - 15) // CELL_SIZE)
+        x = self.core_canvas.canvasx(event.x)
+        y = self.core_canvas.canvasy(event.y)
+        col = int((x - 15) // CELL_SIZE)
+        row = int((y - 15) // CELL_SIZE)
         if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
             return row, col
         return None
@@ -2570,15 +2587,37 @@ class RefuelingWorkspace:
         self.window = tk.Toplevel(app.root)
         self.window.title("Guided Refueling Workspace — Draft Next-Cycle Loading")
         self.window.geometry("1540x900")
-        self.window.minsize(1220, 760)
+        self.window.minsize(800, 620)
         self.window.configure(bg="#0f1115")
         self.window.protocol("WM_DELETE_WINDOW", self.cancel)
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
-        toolbar = ttk.Frame(self.window, padding=8)
-        toolbar.pack(fill=tk.X)
+        toolbar_shell = ttk.Frame(self.window)
+        toolbar_shell.pack(fill=tk.X)
+        toolbar_canvas = tk.Canvas(
+            toolbar_shell, height=46, bg="#0f1115", highlightthickness=0,
+            borderwidth=0,
+        )
+        toolbar_scroll = ttk.Scrollbar(
+            toolbar_shell, orient=tk.HORIZONTAL, command=toolbar_canvas.xview,
+        )
+        toolbar_canvas.configure(xscrollcommand=toolbar_scroll.set)
+        toolbar_canvas.pack(fill=tk.X, expand=True)
+        toolbar_scroll.pack(fill=tk.X)
+        toolbar = ttk.Frame(toolbar_canvas, padding=8)
+        toolbar_window = toolbar_canvas.create_window((0, 0), window=toolbar, anchor="nw")
+        toolbar.bind(
+            "<Configure>",
+            lambda _event: toolbar_canvas.configure(scrollregion=toolbar_canvas.bbox("all")),
+        )
+        toolbar_canvas.bind(
+            "<Configure>",
+            lambda event: toolbar_canvas.itemconfigure(
+                toolbar_window, height=max(event.height, toolbar.winfo_reqheight()),
+            ),
+        )
         ttk.Button(toolbar, text="1  Unload core to staging", command=self.unload_core).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="Undo", command=self.undo).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="Redo", command=self.redo).pack(side=tk.LEFT, padx=2)
@@ -2589,17 +2628,38 @@ class RefuelingWorkspace:
         ttk.Button(toolbar, text="COMMIT LOADING AND BEGIN NEXT CYCLE", command=self.commit).pack(side=tk.RIGHT, padx=2)
         ttk.Button(toolbar, text="Cancel", command=self.cancel).pack(side=tk.RIGHT, padx=2)
 
-        body = ttk.Frame(self.window, padding=(8, 0, 8, 6))
+        body = tk.PanedWindow(
+            self.window, orient=tk.HORIZONTAL, bg="#56616d", bd=0,
+            sashwidth=8, sashrelief=tk.RAISED, showhandle=True,
+        )
         body.pack(fill=tk.BOTH, expand=True)
-        body.grid_columnconfigure(1, weight=1)
-        body.grid_rowconfigure(0, weight=1)
 
         left = ttk.Frame(body, style="Panel.TFrame", padding=8)
         centre = ttk.Frame(body, style="Panel.TFrame", padding=8)
-        right = ttk.Frame(body, style="Panel.TFrame", padding=8)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        centre.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
-        right.grid(row=0, column=2, sticky="nsew")
+        right_shell = ttk.Frame(body, style="Panel.TFrame")
+        body.add(left, minsize=210, width=410, stretch="always")
+        body.add(centre, minsize=240, width=680, stretch="always")
+        body.add(right_shell, minsize=210, width=410, stretch="always")
+        self.workspace_panes = body
+
+        right_canvas = tk.Canvas(
+            right_shell, bg="#1c2128", highlightthickness=0, borderwidth=0,
+        )
+        right_scroll = ttk.Scrollbar(right_shell, orient=tk.VERTICAL, command=right_canvas.yview)
+        right_canvas.configure(yscrollcommand=right_scroll.set)
+        right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        right_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        right = ttk.Frame(right_canvas, style="Panel.TFrame", padding=8)
+        right_window = right_canvas.create_window((0, 0), window=right, anchor="nw")
+        right.bind(
+            "<Configure>",
+            lambda _event: right_canvas.configure(scrollregion=right_canvas.bbox("all")),
+        )
+        right_canvas.bind(
+            "<Configure>",
+            lambda event: right_canvas.itemconfigure(right_window, width=event.width),
+        )
+        self.workspace_right_canvas = right_canvas
 
         ttk.Label(left, text="STAGING RACKS", style="Section.TLabel").pack(anchor="w")
         self.notebook = ttk.Notebook(left, width=390)
@@ -2618,11 +2678,23 @@ class RefuelingWorkspace:
 
         ttk.Label(centre, text="DRAFT NEXT-CYCLE CORE", style="Section.TLabel").pack(anchor="w")
         canvas_size = GRID_SIZE * self.CELL + 2 * self.MARGIN
+        core_frame = ttk.Frame(centre, style="Panel.TFrame")
+        core_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 4))
+        core_frame.grid_rowconfigure(0, weight=1)
+        core_frame.grid_columnconfigure(0, weight=1)
         self.canvas = tk.Canvas(
-            centre, width=canvas_size, height=canvas_size,
+            core_frame, width=canvas_size, height=canvas_size,
             bg="#090c10", highlightbackground="#56616d", highlightthickness=1,
+            scrollregion=(0, 0, canvas_size, canvas_size),
         )
-        self.canvas.pack(expand=True, pady=(6, 4))
+        core_vscroll = ttk.Scrollbar(core_frame, orient=tk.VERTICAL, command=self.canvas.yview)
+        core_hscroll = ttk.Scrollbar(core_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        self.canvas.configure(
+            xscrollcommand=core_hscroll.set, yscrollcommand=core_vscroll.set,
+        )
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        core_vscroll.grid(row=0, column=1, sticky="ns")
+        core_hscroll.grid(row=1, column=0, sticky="ew")
         self.canvas.bind("<Button-1>", self.on_core_click)
         self.canvas.bind("<ButtonPress-1>", self.on_core_press, add="+")
         self.canvas.bind("<ButtonRelease-1>", self.on_core_release, add="+")
@@ -2790,6 +2862,8 @@ class RefuelingWorkspace:
         self._write_validation_summary()
 
     def _cell_from_xy(self, x: float, y: float) -> Optional[Tuple[int, int]]:
+        x = self.canvas.canvasx(x)
+        y = self.canvas.canvasy(y)
         col = int((x - self.MARGIN) // self.CELL)
         row = int((y - self.MARGIN) // self.CELL)
         if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE and self.draft.mask[row, col]:
