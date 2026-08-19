@@ -56,7 +56,10 @@ The main window has three working areas:
    indicators, and status messages.
 
 The left and right panes scroll independently. Place the mouse over the pane
-you want to scroll. Maximize the window on a small display.
+you want to scroll. Drag either raised divider between the three panes to give
+more width to the controls, core map, or results. If the center pane becomes
+narrower than the full 11 x 11 map, use the horizontal and vertical scrollbars
+around the core. Maximize the window when practical on a small display.
 
 ## 4. Quick-start equilibrium-cycle exercise
 
@@ -211,6 +214,12 @@ of control positions. It does not model detailed individual rod motion.
 The guided workspace is the preferred way to prepare a next-cycle loading. It
 works on a draft copy; **Cancel** leaves the operating core unchanged.
 
+The staging racks, draft core, and inspector are separated by draggable
+dividers. On a small monitor, resize the three areas as needed, use the
+scrollbars around the draft core, scroll the inspector/workflow pane, and use
+the horizontal scrollbar below the action bar to reach controls that extend
+beyond the window width.
+
 ### 11.1 Open and unload
 
 1. Save the current refueling state as a precaution.
@@ -314,7 +323,10 @@ Change one factor at a time and save or export each reference case.
 ## 14. Troubleshooting
 
 - **Controls or indicators are hidden:** maximize the window and scroll the
-  left or right pane while the pointer is over it.
+  left or right pane while the pointer is over it. You can also drag the pane
+  dividers to redistribute the available width.
+- **Part of the core map is hidden:** widen the center pane by dragging its
+  divider, or use the scrollbars immediately below and beside the core map.
 - **The 3-D plot does not zoom:** place the pointer directly over the plot and
   use the mouse wheel.
 - **Recalculate does not advance burnup:** this is expected; use Single cycle

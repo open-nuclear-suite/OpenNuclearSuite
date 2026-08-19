@@ -64,7 +64,7 @@ Copy-Item -LiteralPath "$projectRoot\VERSION" -Destination $releaseDir -Force
 $executables = @(
     (Join-Path $releaseDir "Reactor-Physics-and-Kinetics-Simulator\Reactor-Physics-and-Kinetics-Simulator.exe"),
     (Join-Path $releaseDir "Thermal-Hydraulics-and-LOCA-Simulator\Thermal-Hydraulics-and-LOCA-Simulator.exe"),
-    (Join-Path $releaseDir "Core-Loading-Simulator\Core-Loading-Simulator.exe")
+    (Join-Path $releaseDir "Core-Loading-Simulator\Core-Loading-Simulator.exe"),
     (Join-Path $releaseDir "Hardware-Reactor-Control-Panel-UNTESTED\Hardware-Reactor-Control-Panel-UNTESTED.exe")
 )
 
