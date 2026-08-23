@@ -39,7 +39,7 @@ Requirements
     matplotlib
 
 Optional:
-    pillow   (for smooth UTM logo scaling)
+    pillow   (optional, for smooth image scaling)
 
 Run
 ---
@@ -81,30 +81,17 @@ from matplotlib.figure import Figure
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
 MODULE_NAME = "Interactive Core Loading and Thorium Fuel-Cycle Explorer"
 
-ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+ABOUT_MESSAGE = """Open Nuclear Engineering Teaching Suite
 
-We would be delighted to hear from educators, students, researchers, and other users of this software.
+Interactive desktop simulators for teaching reactor physics, kinetics,
+thermal-hydraulics, LOCA behavior, and core loading concepts.
 
-Please consider sending us a postcard or a short thank-you email describing:
+Author and maintainer: maxisnote20
+Email: maxisnote20@gmail.com
+Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 
-• where you are using the software;
-• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
-• any comments or experiences you would like to share.
-
-Postcards may be sent to:
-
-Dean
-Faculty of Chemical and Energy Engineering
-Universiti Teknologi Malaysia
-81310 UTM Skudai
-Johor
-Malaysia
-
-Email: fcee@utm.my
-
-Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
-
-Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+This software is intended for education and demonstration. It must not be
+used for reactor design, licensing, safety analysis, or plant operation."""
 
 
 def show_suite_about(parent: tk.Misc) -> None:
@@ -120,11 +107,9 @@ def show_suite_about(parent: tk.Misc) -> None:
     text.configure(state=tk.DISABLED)
     actions = ttk.Frame(window, padding=(16, 10))
     actions.pack(fill=tk.X)
-    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="EMAIL AUTHOR", command=lambda: webbrowser.open("mailto:maxisnote20@gmail.com")).pack(side=tk.LEFT)
     ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
     window.focus_set()
-SPLASH_LOGO_FILENAME = "UTM.logo.png"
-BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 GRID_SIZE = 11
 CELL_SIZE = 48
@@ -1204,7 +1189,7 @@ def load_logo(
     master: tk.Misc,
     max_width: int,
     max_height: int,
-    filename: str = BANNER_LOGO_FILENAME,
+    filename: str = "",
 ) -> Optional[tk.PhotoImage]:
     path = find_logo_path(filename)
     if path is None:
@@ -1294,15 +1279,6 @@ class CoreLoadingApp:
         ttk.Label(title_block, text=MODULE_NAME.upper(), style="Header.TLabel").pack(anchor="w")
         ttk.Label(title_block, text=PROJECT_NAME, style="Sub.TLabel").pack(anchor="w", pady=(3, 0))
 
-        self.logo_image = load_logo(
-            self.root, 700, 70, filename=BANNER_LOGO_FILENAME,
-        )
-        if self.logo_image is not None:
-            tk.Label(header, image=self.logo_image, bg="#0f1115", bd=0).grid(
-                row=0, column=2, sticky="e", padx=(18, 0),
-            )
-        else:
-            tk.Label(header, text="UTM", bg="#7d1238", fg="white", font=("Segoe UI", 18, "bold"), padx=18, pady=7).grid(row=0, column=2, sticky="e")
 
         ttk.Button(header, text="ABOUT", command=lambda: show_suite_about(self.root)).grid(
             row=0, column=1, sticky="e", padx=(18, 0),
@@ -3149,15 +3125,6 @@ def show_splash(root: tk.Tk, duration_ms: int = 3000) -> None:
     border.pack(fill=tk.BOTH, expand=True)
     panel = tk.Frame(border, bg="#12161c", padx=34, pady=24)
     panel.pack(fill=tk.BOTH, expand=True)
-
-    splash.logo_image = load_logo(
-        splash, 720, 245, filename=SPLASH_LOGO_FILENAME,
-    )
-    if splash.logo_image is not None:
-        tk.Label(panel, image=splash.logo_image, bg="#12161c", bd=0).pack(pady=(0, 18))
-    else:
-        tk.Label(panel, text="UTM", bg="#7d1238", fg="white", font=("Segoe UI", 30, "bold"), padx=30, pady=7).pack(pady=(0, 16))
-
     tk.Label(panel, text=PROJECT_NAME, bg="#12161c", fg="#f3f5f7", font=("Segoe UI", 21, "bold")).pack()
     tk.Label(panel, text=MODULE_NAME, bg="#12161c", fg="#c7d1db", font=("Segoe UI", 11)).pack(pady=(8, 0))
 

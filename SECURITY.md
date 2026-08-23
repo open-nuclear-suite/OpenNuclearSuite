@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Do not disclose a suspected vulnerability in a public issue. Email
-[mohsin.sies@gmail.com](mailto:mohsin.sies@gmail.com) or use the private
+[maxisnote20@gmail.com](mailto:maxisnote20@gmail.com) or use the private
 security reporting method configured on the GitHub repository. Include
 reproduction steps, affected files or versions, and the potential impact.
 

@@ -4,10 +4,8 @@ REACTOR_TEACHING_SIMULATOR_MERGED_V7_CSV_EXPORT.PY
 
 Merged teaching reactor simulator with fault injection, improved display layout, scrollable panes, and CSV export.
 
-Author: Mohsin Mohd Sies
-Affiliation: Nuclear Engineering Program, Faculty of Chemical and Energy
-    Engineering, Universiti Teknologi Malaysia
-Contact: mohsin.sies@gmail.com
+Author: maxisnote20
+Contact: maxisnote20@gmail.com
 Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 License: MIT
 
@@ -68,30 +66,17 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
 
-ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+ABOUT_MESSAGE = """Open Nuclear Engineering Teaching Suite
 
-We would be delighted to hear from educators, students, researchers, and other users of this software.
+Interactive desktop simulators for teaching reactor physics, kinetics,
+thermal-hydraulics, LOCA behavior, and core loading concepts.
 
-Please consider sending us a postcard or a short thank-you email describing:
+Author and maintainer: maxisnote20
+Email: maxisnote20@gmail.com
+Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 
-• where you are using the software;
-• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
-• any comments or experiences you would like to share.
-
-Postcards may be sent to:
-
-Dean
-Faculty of Chemical and Energy Engineering
-Universiti Teknologi Malaysia
-81310 UTM Skudai
-Johor
-Malaysia
-
-Email: fcee@utm.my
-
-Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
-
-Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+This software is intended for education and demonstration. It must not be
+used for reactor design, licensing, safety analysis, or plant operation."""
 
 
 def show_suite_about(parent):
@@ -107,11 +92,9 @@ def show_suite_about(parent):
     text.configure(state=tk.DISABLED)
     actions = ttk.Frame(window, padding=(16, 10))
     actions.pack(fill=tk.X)
-    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="EMAIL AUTHOR", command=lambda: webbrowser.open("mailto:maxisnote20@gmail.com")).pack(side=tk.LEFT)
     ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
     window.focus_set()
-SPLASH_LOGO_FILENAME = "UTM.logo.png"
-BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
 
 KINETICS_PRESETS = {
@@ -254,7 +237,7 @@ def find_logo_path(filename):
     return None
 
 
-def load_logo_image(master, max_width, max_height=None, filename=BANNER_LOGO_FILENAME):
+def load_logo_image(master, max_width, max_height=None, filename=""):
     """Load a branding image and fit it proportionally inside a box.
 
     Pillow is used when available for smooth, exact resizing. If Pillow is not
@@ -303,20 +286,6 @@ def show_startup_splash(root, module_name, duration_ms=3000):
     border.pack(fill="both", expand=True)
     panel = tk.Frame(border, bg="#12161c", padx=34, pady=24)
     panel.pack(fill="both", expand=True)
-
-    splash.logo_image = load_logo_image(
-        splash,
-        max_width=720,
-        max_height=245,
-        filename=SPLASH_LOGO_FILENAME,
-    )
-    if splash.logo_image is not None:
-        tk.Label(panel, image=splash.logo_image, bg="#12161c", bd=0).pack(pady=(0, 18))
-    else:
-        tk.Label(
-            panel, text="UTM", bg="#7d1238", fg="white",
-            font=("Segoe UI", 34, "bold"), padx=34, pady=8,
-        ).pack(pady=(0, 18))
 
     tk.Label(
         panel, text=PROJECT_NAME, bg="#12161c", fg="#f3f5f7",
@@ -1638,7 +1607,6 @@ class PlantDisplay:
         ax.text(0.84, 0.05, f"{vmax:g}", color=(0.75, 0.78, 0.82), fontsize=8)
 
 
-
 # ============================================================
 # Scrollable pane helper
 # ============================================================
@@ -1788,18 +1756,6 @@ class ReactorTeachingSimulatorTk:
             font=("Segoe UI", 9), anchor="w",
         ).pack(anchor="w", pady=(2, 0))
 
-        # About 2 mm taller than the thermal banner's earlier 62 px rendering
-        # at the standard 96-DPI desktop scale.
-        self.utm_logo_image = load_logo_image(self.root, max_width=700, max_height=70)
-        if self.utm_logo_image is not None:
-            tk.Label(
-                header, image=self.utm_logo_image, bg=self.colors["bg"], bd=0,
-            ).grid(row=0, column=2, sticky="e", padx=(18, 0))
-        else:
-            tk.Label(
-                header, text="UTM", bg="#7d1238", fg="white",
-                font=("Segoe UI", 18, "bold"), padx=18, pady=6,
-            ).grid(row=0, column=2, sticky="e", padx=(18, 0))
 
         ttk.Button(header, text="ABOUT", command=lambda: show_suite_about(self.root)).grid(
             row=0, column=1, sticky="e", padx=(18, 0),
