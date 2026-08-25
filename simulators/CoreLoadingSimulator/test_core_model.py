@@ -23,11 +23,43 @@ class CoreModelTests(unittest.TestCase):
         self.assertGreater(float(np.max(model.fast_flux)), 0.0)
         self.assertGreater(float(np.max(model.thermal_flux)), 0.0)
 
+    def test_converged_feedback_preserves_rotational_symmetry(self) -> None:
+        model = CoreModel()
+        for _ in range(5):
+            model.advance_cycle(30.0)
+        for field in (model.power, model.flux, model.burnup, model.u235_inventory,
+                      model.xenon135_inventory, model.samarium149_inventory):
+            np.testing.assert_allclose(field, np.rot90(field, 2), rtol=0.0, atol=1.0e-8)
+        self.assertAlmostEqual(model.north_south_tilt, 0.0, places=10)
+        self.assertAlmostEqual(model.east_west_tilt, 0.0, places=10)
+
+    def test_feedback_solver_does_not_force_an_asymmetric_state(self) -> None:
+        model = CoreModel()
+        model.burnup[4, 5] += 1.0
+        model.advance_cycle(30.0)
+        self.assertGreater(abs(float(model.burnup[4, 5] - model.burnup[6, 5])), 0.5)
+
     def test_conventional_cycle_reaches_unity_near_end_of_cycle(self) -> None:
         model = CoreModel()
         model.advance_cycle(420.0)
         self.assertAlmostEqual(model.k_eff, 1.0, delta=0.01)
         self.assertLess(model.required_boron_ppm, 10.0)
+
+    def test_advertised_1000_fpd_horizon_remains_well_conditioned(self) -> None:
+        model = CoreModel()
+        model.advance_cycle(1000.0)
+        fuel = model.mask & (model.layout != "EMPTY") & (model.layout != "REFL")
+        self.assertAlmostEqual(model.cycle_days, 1000.0, places=8)
+        self.assertLessEqual(model.feedback_residual, 1.0e-7)
+        for field in (
+            model.power, model.flux, model.burnup, model.u235_inventory,
+            model.pu239_inventory, model.xenon135_inventory,
+        ):
+            self.assertTrue(np.all(np.isfinite(field)))
+            self.assertGreaterEqual(float(np.min(field[fuel])), 0.0)
+        np.testing.assert_allclose(
+            model.power, np.rot90(model.power, 2), rtol=0.0, atol=1.0e-8,
+        )
 
     def test_boron_search_reduces_the_eigenvalue(self) -> None:
         model = CoreModel()
@@ -63,6 +95,43 @@ class CoreModelTests(unittest.TestCase):
         self.assertGreater(model.control_worth_pcm, 0.0)
         self.assertLess(model.shutdown_k_eff, 1.0)
         self.assertGreater(model.shutdown_margin_pcm, 0.0)
+
+    def test_feedback_converges_across_control_insertion_range(self) -> None:
+        for insertion in (5.0, 25.0, 50.0, 75.0, 100.0):
+            with self.subTest(insertion=insertion):
+                model = CoreModel()
+                model.set_control_insertion(insertion)
+                self.assertLessEqual(model.feedback_residual, 1.0e-7)
+                self.assertTrue(np.isfinite(model.k_eff))
+
+    def test_controlled_depletion_recovers_stalled_feedback_iteration(self) -> None:
+        for insertion, steps in ((25.0, 3), (75.0, 2)):
+            with self.subTest(insertion=insertion):
+                model = CoreModel()
+                model.set_control_insertion(insertion)
+                restart_counts = []
+                for _ in range(steps):
+                    model.advance_cycle(30.0)
+                    restart_counts.append(model.feedback_restart_count)
+                    self.assertLessEqual(model.feedback_residual, 1.0e-7)
+                self.assertGreater(max(restart_counts), 0)
+
+    def test_controlled_depletion_reaches_1000_fpd_in_40_steps(self) -> None:
+        """Long-horizon coverage for the full control-insertion sweep."""
+        for insertion in (10.0, 25.0, 50.0, 75.0, 100.0):
+            with self.subTest(insertion=insertion):
+                model = CoreModel()
+                model.set_control_insertion(insertion)
+                for _ in range(40):
+                    model.advance_cycle(25.0)
+                    self.assertLessEqual(model.feedback_residual, 1.0e-7)
+                    for field in (
+                        model.power, model.flux, model.burnup,
+                        model.u235_inventory, model.pu239_inventory,
+                        model.xenon135_inventory,
+                    ):
+                        self.assertTrue(np.all(np.isfinite(field)))
+                self.assertAlmostEqual(model.cycle_days, 1000.0, places=8)
 
     def test_refueling_move_preserves_identity_burnup_and_isotopes(self) -> None:
         model = CoreModel()

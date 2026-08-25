@@ -624,8 +624,14 @@ class CoreModel:
         self,
         max_iterations: int = 250,
         tolerance: float = 1.0e-8,
-        feedback_iterations: int = 8,
+        feedback_iterations: int = 240,
+        feedback_tolerance: float = 1.0e-7,
+        feedback_relaxation: float = 0.40,
+        _previous_feedback_residual: Optional[float] = None,
+        _feedback_restarts: int = 0,
     ) -> None:
+        if _previous_feedback_residual is None and _feedback_restarts == 0:
+            self.feedback_restart_count = 0
         active = self.mask & (self.layout != "EMPTY")
         if not np.any(active):
             self.reset_arrays()
@@ -691,18 +697,58 @@ class CoreModel:
             / (1.0 + 0.90 * self.thermal_flux),
             0.0,
         )
-        if feedback_iterations > 1:
-            relaxation = 0.65
-            for field, target in (
+        feedback_fields = (
                 (self.fuel_temperature, target_fuel_temp),
                 (self.moderator_temperature, target_moderator_temp),
                 (self.moderator_density, target_density),
                 (self.iodine135_inventory, target_iodine),
                 (self.xenon135_inventory, target_xenon),
+        )
+        feedback_residual = max(
+            float(np.max(
+                np.abs(target[active] - field[active])
+                / np.maximum(np.abs(target[active]), 1.0)
+            ))
+            for field, target in feedback_fields
+        )
+        self.feedback_residual = feedback_residual
+        if feedback_iterations > 1 and feedback_residual > feedback_tolerance:
+            relaxation = feedback_relaxation
+            if (
+                _previous_feedback_residual is not None
+                and feedback_residual > 1.02 * _previous_feedback_residual
             ):
-                field[active] = (1.0 - relaxation) * field[active] + relaxation * target[active]
-            self.solve(max_iterations, tolerance, feedback_iterations - 1)
+                relaxation = max(0.05, 0.5 * relaxation)
+            elif (
+                _previous_feedback_residual is not None
+                and feedback_residual < 0.85 * _previous_feedback_residual
+            ):
+                relaxation = min(0.50, 1.10 * relaxation)
+            for field, target in feedback_fields:
+                field[active] += relaxation * (target[active] - field[active])
+            self.solve(
+                max_iterations, tolerance, feedback_iterations - 1,
+                feedback_tolerance, relaxation, feedback_residual,
+                _feedback_restarts,
+            )
             return
+        if feedback_residual > feedback_tolerance:
+            if _feedback_restarts < 4:
+                self.feedback_restart_count = _feedback_restarts + 1
+                self.solve(
+                    max_iterations=max_iterations,
+                    tolerance=tolerance,
+                    feedback_iterations=240,
+                    feedback_tolerance=feedback_tolerance,
+                    feedback_relaxation=0.40,
+                    _previous_feedback_residual=None,
+                    _feedback_restarts=_feedback_restarts + 1,
+                )
+                return
+            raise RuntimeError(
+                "Coupled neutronics/thermal/xenon feedback did not converge "
+                f"(residual {feedback_residual:.3e}, target {feedback_tolerance:.3e})."
+            )
 
         # Calculate rod worth and the all-banks-in shutdown state at the
         # converged temperature and poison condition without altering the core.
@@ -779,6 +825,15 @@ class CoreModel:
 
     def advance_cycle(self, days: float) -> None:
         if days <= 0.0:
+            return
+        # Explicit depletion updates remain well conditioned at the normal
+        # teaching step of 30 FPD.  Split unusually large requests internally
+        # instead of applying one oversized nonlinear isotope update.
+        if days > 30.0:
+            increments = int(math.ceil(days / 30.0))
+            increment = days / increments
+            for _ in range(increments):
+                self.advance_cycle(increment)
             return
         self.solve()
         active = self.mask & (self.layout != "EMPTY")

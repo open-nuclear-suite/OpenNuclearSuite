@@ -2,9 +2,10 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".build-venv\Scripts\python.exe"
-$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-1.3.0-Windows-Onedir"
+$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows-Onedir"
 $workDir = Join-Path $projectRoot "build\onedir"
 $specDir = Join-Path $projectRoot "build-specs\onedir"
+$env:QT_API = "pyside6"
 
 if (-not (Test-Path -LiteralPath $python)) {
     py -m venv --system-site-packages (Join-Path $projectRoot ".build-venv")

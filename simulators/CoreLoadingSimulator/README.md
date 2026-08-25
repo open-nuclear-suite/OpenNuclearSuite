@@ -1,5 +1,19 @@
 # Core Loading Simulator
 
+The default desktop interface is now the responsive PySide6/PyQtGraph Core
+Loading Explorer. It retains the canonical two-group model and fuel-management
+state while using Qt widgets and GPU-backed heatmaps/trend plots.
+
+```powershell
+python main.py
+```
+
+The former Tkinter/Matplotlib interface remains available for comparison:
+
+```powershell
+python main.py --legacy-tk
+```
+
 An interactive 11 x 11 assembly-level teaching simulator for exploring how
 loading patterns affect simplified neutron flux, relative power, burnup,
 leakage, and thorium fuel-cycle indicators.

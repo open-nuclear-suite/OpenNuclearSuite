@@ -3,7 +3,8 @@
 A collection of three interactive desktop simulators plus an optional hardware
 control-panel edition for teaching introductory
 reactor physics, core loading, and light-water-reactor thermal-hydraulics. The applications use
-Python, Tkinter, NumPy, and Matplotlib.
+Python, PySide6, PyQtGraph, NumPy, and OpenGL. The former Tkinter interfaces
+remain available as compatibility front ends.
 
 > **Teaching software only.** These simplified, lumped-parameter models are not
 > suitable for reactor design, licensing, safety analysis, operator training,
@@ -120,7 +121,7 @@ From PowerShell on Windows, run:
 
 The script creates one-file, windowed executables for the three simulators and
 the explicitly labelled untested hardware-panel edition under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.3.0-Windows`. The release
+`release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows`. The release
 also includes the license, citation metadata, Windows instructions, and
 SHA-256 checksums. End users do not need Python installed.
 
@@ -131,7 +132,7 @@ For faster startup, build folder-based editions instead:
 ```
 
 These are created under
-`release\Open-Nuclear-Engineering-Teaching-Suite-1.3.0-Windows-Onedir`.
+`release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows-Onedir`.
 Each simulator's executable must remain beside its `_internal` folder, but it
 starts faster because bundled components do not need to be unpacked on every
 launch. The build also creates a ZIP of the complete folder-based release for

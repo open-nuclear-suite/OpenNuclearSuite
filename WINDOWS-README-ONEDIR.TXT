@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.3.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.0.0
 Windows faster-starting folder release
 
 Each simulator has its own folder. Open the appropriate folder and run:
@@ -25,6 +25,10 @@ will not run if an EXE is copied out by itself. Python is not required.
 
 This folder-based edition starts faster than the single-file edition because
 it does not unpack its bundled Python runtime and libraries at every launch.
+
+The three software-only simulators use responsive native Qt controls and
+GPU-accelerated engineering plots by default. Their computational models run
+at fixed numerical timesteps independently of display refreshes.
 
 Windows SmartScreen may warn about downloaded, unsigned executables. If you
 obtained this release from the official project source, use "More info" and

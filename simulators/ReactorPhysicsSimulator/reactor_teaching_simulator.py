@@ -68,30 +68,15 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
 
-ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+ABOUT_MESSAGE = """Open Nuclear Engineering Teaching Suite
 
-We would be delighted to hear from educators, students, researchers, and other users of this software.
+Created and maintained by maxisnote.
 
-Please consider sending us a postcard or a short thank-you email describing:
+Questions, feedback, and reports of how the simulator is being used are welcome.
 
-• where you are using the software;
-• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
-• any comments or experiences you would like to share.
+Email: maxisnote2@gmail.com
 
-Postcards may be sent to:
-
-Dean
-Faculty of Chemical and Energy Engineering
-Universiti Teknologi Malaysia
-81310 UTM Skudai
-Johor
-Malaysia
-
-Email: fcee@utm.my
-
-Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
-
-Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+Thank you for using the Open Nuclear Engineering Teaching Suite."""
 
 
 def show_suite_about(parent):
@@ -107,7 +92,7 @@ def show_suite_about(parent):
     text.configure(state=tk.DISABLED)
     actions = ttk.Frame(window, padding=(16, 10))
     actions.pack(fill=tk.X)
-    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="EMAIL MAXISNOTE", command=lambda: webbrowser.open("mailto:maxisnote2@gmail.com")).pack(side=tk.LEFT)
     ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
     window.focus_set()
 SPLASH_LOGO_FILENAME = "UTM.logo.png"
@@ -467,6 +452,7 @@ EXPORT_COLUMNS = [
     "target_power_pct",
     "reactivity_pcm",
     "rho_rod_pcm",
+    "rho_scram_pcm",
     "rho_manual_pcm",
     "rho_temp_pcm",
     "rho_fuel_pcm",
@@ -521,6 +507,14 @@ class ReactorState:
         self.running = False
         self.mode = "manual"       # manual, auto, load_follow
         self.scram = False
+        # SCRAM uses a shutdown-only, representative prompt-neutron timescale
+        # and an independent protection-bank worth. Normal classroom kinetics
+        # remain deliberately slow and unchanged during ordinary operation.
+        self.scram_kinetics_active = False
+        self.scram_start_time = None
+        self.scram_prompt_generation_time_s = 2.0e-5
+        self.scram_protection_worth = -0.0500
+        self.rho_scram = 0.0
 
         # Six delayed neutron group point kinetics, typical thermal U-235 data.
         self.beta_i = np.array([0.000215, 0.001424, 0.001274, 0.002568, 0.000748, 0.000273], dtype=float)
@@ -747,9 +741,10 @@ class ReactorState:
         depletion = self.rho_depletion if advanced else 0.0
         self.rho_total = (
             self.rho_rods + self.rho_manual + self.rho_temp + self.rho_boron
-            + self.rho_xe + self.rho_sm + depletion
+            + self.rho_xe + self.rho_sm + depletion + self.rho_scram
         )
-        self.rho_total = clamp(self.rho_total, -0.0250, 0.95 * self.beta)
+        lower_limit = -0.0500 if self.scram_kinetics_active else -0.0250
+        self.rho_total = clamp(self.rho_total, lower_limit, 0.95 * self.beta)
 
     def update_derived(self):
         self.powerPct = 100.0 * self.P
@@ -828,6 +823,7 @@ class ReactorState:
             "target_power_pct": self.targetPct,
             "reactivity_pcm": self.reactivity_pcm,
             "rho_rod_pcm": 1.0e5 * self.rho_rods,
+            "rho_scram_pcm": 1.0e5 * self.rho_scram,
             "rho_manual_pcm": 1.0e5 * self.rho_manual,
             "rho_temp_pcm": 1.0e5 * self.rho_temp,
             "rho_fuel_pcm": 1.0e5 * self.rho_fuel,
@@ -925,14 +921,15 @@ class ReactorModel:
         return len(self.s.export_rows)
 
     @staticmethod
-    def _kinetics_derivative(state, power, precursors):
+    def _kinetics_derivative(state, power, precursors, prompt_generation_time=None):
+        generation_time = prompt_generation_time or state.Lambda
         delayed_source = float(np.sum(state.lambda_i * precursors))
         power_rate = (
-            ((state.rho_total - state.beta) / state.Lambda) * power
+            ((state.rho_total - state.beta) / generation_time) * power
             + delayed_source
             + state.source_strength
         )
-        precursor_rate = (state.beta_i / state.Lambda) * power - state.lambda_i * precursors
+        precursor_rate = (state.beta_i / generation_time) * power - state.lambda_i * precursors
         return power_rate, precursor_rate
 
     def _advance_point_kinetics(self):
@@ -944,7 +941,12 @@ class ReactorModel:
         Reactivity and source are held constant during this 20 ms outer step.
         """
         state = self.s
-        if not state.pedagogical_settings.dimensioned_lwr:
+        generation_time = (
+            state.scram_prompt_generation_time_s
+            if state.scram_kinetics_active else state.Lambda
+        )
+        use_substeps = state.pedagogical_settings.dimensioned_lwr or state.scram_kinetics_active
+        if not use_substeps:
             old_precursors = state.C.copy()
             power_rate, precursor_rate = self._kinetics_derivative(
                 state, state.P, old_precursors
@@ -957,22 +959,22 @@ class ReactorModel:
         # Resolve the near-critical prompt-mode time constant Lambda / beta
         # with at least five RK4 steps.  This is an accuracy policy rather than
         # a wall-clock speed setting.
-        maximum_step = max(1.0e-6, 0.20 * state.Lambda / state.beta)
+        maximum_step = max(1.0e-6, 0.20 * generation_time / state.beta)
         substeps = max(1, int(math.ceil(state.dt / maximum_step)))
         step = state.dt / substeps
         power = state.P
         precursors = state.C.copy()
 
         for _ in range(substeps):
-            k1p, k1c = self._kinetics_derivative(state, power, precursors)
+            k1p, k1c = self._kinetics_derivative(state, power, precursors, generation_time)
             k2p, k2c = self._kinetics_derivative(
-                state, power + 0.5 * step * k1p, precursors + 0.5 * step * k1c
+                state, power + 0.5 * step * k1p, precursors + 0.5 * step * k1c, generation_time
             )
             k3p, k3c = self._kinetics_derivative(
-                state, power + 0.5 * step * k2p, precursors + 0.5 * step * k2c
+                state, power + 0.5 * step * k2p, precursors + 0.5 * step * k2c, generation_time
             )
             k4p, k4c = self._kinetics_derivative(
-                state, power + step * k3p, precursors + step * k3c
+                state, power + step * k3p, precursors + step * k3c, generation_time
             )
             power += (step / 6.0) * (k1p + 2.0 * k2p + 2.0 * k3p + k4p)
             precursors += (step / 6.0) * (k1c + 2.0 * k2c + 2.0 * k3c + k4c)
@@ -980,6 +982,32 @@ class ReactorModel:
         state.P = clamp(float(power), 1.0e-8, 3.0)
         state.C = np.maximum(precursors, 0.0)
         state.kinetics_substeps = substeps
+
+    def _update_scram_kinetics(self):
+        """Switch SCRAM transients to representative point-kinetics scaling."""
+        state = self.s
+        if state.scram and not state.scram_kinetics_active:
+            # Preserve the equilibrium delayed-neutron source when changing
+            # generation-time units at the protection-system boundary.
+            state.C *= state.Lambda / state.scram_prompt_generation_time_s
+            state.scram_kinetics_active = True
+            state.scram_start_time = state.time
+            state.add_log("Representative SCRAM kinetics active: protection bank inserting over 1 s; decay heat persists.")
+        elif not state.scram and state.scram_kinetics_active:
+            state.C *= state.scram_prompt_generation_time_s / state.Lambda
+            state.scram_kinetics_active = False
+            state.scram_start_time = None
+            state.rho_scram = 0.0
+
+        if not state.scram_kinetics_active or state.fault_stuck_rod:
+            state.rho_scram = 0.0
+            return
+        elapsed = max(0.0, state.time - state.scram_start_time + state.dt)
+        insertion = min(elapsed / 1.0, 1.0)
+        if state.fault_partial_scram:
+            failed_position = 5.0 + 35.0 * state.fault_fraction()
+            insertion = min(insertion, 1.0 - failed_position / 100.0)
+        state.rho_scram = state.scram_protection_worth * insertion
 
     def _advance_thermal_nodes(self):
         """Advance either the legacy response model or the LWR energy balance."""
@@ -1106,7 +1134,10 @@ class ReactorModel:
                 s.heatSink = target_sink + (s.heat_sink_initial - target_sink) * math.exp(-t_fault / tau_sink)
                 s.heatSink = clamp(s.heatSink, 10.0, 120.0)
 
-            # Explicit integration substeps.
+            # Explicit integration substeps. SCRAM activates a representative
+            # protection-bank worth and prompt-neutron timescale; decay heat
+            # remains governed by its independent post-shutdown groups.
+            self._update_scram_kinetics()
             s.update_reactivity_terms()
 
             self._advance_point_kinetics()
@@ -2259,7 +2290,8 @@ class ReactorTeachingSimulatorTk:
             f"Initial condition: {s.pedagogical_settings.initial_condition}"
         )
         components = [
-            ("Rod bank", s.rho_rods), ("Manual trim", s.rho_manual),
+            ("Rod bank", s.rho_rods), ("SCRAM protection", s.rho_scram),
+            ("Manual trim", s.rho_manual),
             ("Fuel Doppler", s.rho_fuel), ("Moderator temperature", s.rho_moderator_temp),
             ("Moderator density", s.rho_density), ("Void", s.rho_void),
             ("Boron", s.rho_boron), ("Xe-135", s.rho_xe),

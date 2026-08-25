@@ -1,0 +1,4 @@
+# Optional Thermal Hydraulics GUI comparison prototypes.
+PySide6>=6.8,<7
+pyqtgraph>=0.13.7,<1
+numpy>=1.24

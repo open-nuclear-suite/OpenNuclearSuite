@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 1.3.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.0.0
 Windows standalone release
 
 This folder contains three independent simulators and one optional hardware-panel edition:
@@ -16,6 +16,10 @@ reactor, laboratory, process-control, protection, or safety equipment.
 Double-click either executable to start it. Python is not required.
 The first launch can take several seconds while the one-file application
 extracts its bundled components.
+
+The three software-only simulators use responsive native Qt controls and
+GPU-accelerated engineering plots by default. Their computational models run
+at fixed numerical timesteps independently of display refreshes.
 
 Windows SmartScreen may warn about downloaded, unsigned executables. If you
 obtained this release from the official project source, use "More info" and

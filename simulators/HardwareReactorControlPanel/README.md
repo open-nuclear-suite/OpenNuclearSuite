@@ -14,7 +14,7 @@
 This is a separate hardware integration edition of the Reactor Physics and
 Kinetics Simulator. It imports the canonical validated model and GUI without
 modifying or copying their equations. Physical panel I/O is isolated here.
-Consequently, the 1.3.0 reactor physics, accessibility, responsive GUI, and
+Consequently, the 2.0.0 reactor physics, accessibility, responsive GUI, and
 operator-facing control-rod insertion convention are shared automatically.
 
 > **Educational use only.** This project is not a reactor protection system,

@@ -145,6 +145,29 @@ class PhysicsVerificationTests(unittest.TestCase):
         model.advance(1.0)
         self.assertEqual(state.rod_pos, 0.0)
 
+    def test_scram_uses_representative_shutdown_kinetics_and_preserves_decay_heat(self):
+        model = sim.ReactorModel()
+        state = model.s
+        state.scram = True
+        model.advance(1.0)
+        self.assertTrue(state.scram_kinetics_active)
+        self.assertLess(state.P, 0.10)
+        self.assertGreater(state.Qdecay, 0.05)
+        self.assertLessEqual(state.rho_scram, -0.049)
+        model.advance(59.0)
+        self.assertLess(state.P, 0.01)
+        self.assertGreater(state.Qdecay, state.P)
+
+    def test_stuck_rod_fault_prevents_scram_protection_worth(self):
+        model = sim.ReactorModel()
+        state = model.s
+        state.fault_stuck_rod = True
+        state.stuck_rod_pos = state.rod_pos
+        state.scram = True
+        model.advance(1.0)
+        self.assertEqual(state.rho_scram, 0.0)
+        self.assertAlmostEqual(state.P, 1.0, delta=1.0e-8)
+
     def test_delayed_precursor_initialization_is_exact_equilibrium(self):
         state = sim.ReactorState()
         derivatives = (state.beta_i / state.Lambda) * state.P - state.lambda_i * state.C

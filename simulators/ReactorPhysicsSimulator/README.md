@@ -11,6 +11,19 @@ Run from the repository root with:
 python simulators/ReactorPhysicsSimulator/main.py
 ```
 
+The default interface uses native PySide6 widgets and GPU-accelerated
+PyQtGraph plots. It keeps physics integration on the model's fixed 0.02 s
+timestep, refreshes controls and plots at 10 Hz, and schedules display frames
+independently. The complete Dear PyGui interface remains available for
+comparison with `--dearpygui`, and the original Tkinter interface with
+`--legacy-tk`.
+
+Install the desktop dependencies with:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
 Windows users can instead run `run_reactor_simulator.bat` from the repository
 root.
 
@@ -40,6 +53,20 @@ validated defaults** to return to the standard classroom configuration.
 These controls change the model equations and must not be confused with a
 wall-clock animation-speed control. Decay-heat timescales remain fixed, and
 unbounded custom kinetic constants are intentionally unavailable.
+
+## SCRAM response
+
+Normal operation retains the selected classroom or representative kinetics
+preset. A SCRAM switches the shutdown transient to a representative `2e-5 s`
+prompt-neutron generation time and inserts an independent protection-bank
+worth to `-5000 pcm` over one second. Six delayed-neutron groups produce the
+post-trip fission-power tail, while the existing decay-heat groups remain
+independent and continue to generate heat after neutron power collapses.
+
+The partial-SCRAM fault limits protection-bank insertion and the stuck-rod
+fault prevents it, so fault demonstrations continue to affect shutdown
+performance. These are transparent representative teaching parameters, not a
+plant-specific protection-system or shutdown-margin model.
 
 ## Representative LWR kinetics and power profile
 
@@ -113,9 +140,12 @@ laboratory-period demonstration and is not plant time.
 The model uses explicit Euler integration with `dt = 0.02 s`. Near the initial
 critical state, the fast prompt-mode eigenvalue is approximately
 `-beta / Lambda`, giving the scalar stability condition `dt < 2 Lambda / beta`.
-All three legacy bounded kinetics presets retain ample linear stability margin at the
-current timestep. Any future custom mode would require separate numerical
-validation and a conservative timestep policy.
+All three legacy bounded kinetics presets retain ample linear stability margin
+at the current timestep during normal operation. SCRAM transients use the same
+RK4 automatic-substep policy as the Representative LWR preset so the faster
+shutdown-only prompt timescale is resolved safely. Any future custom mode
+would require separate numerical validation and a conservative timestep
+policy.
 
 The Representative LWR preset is intentionally different: its realistic-scale
 prompt generation time makes a single 0.02 s explicit-Euler step unsuitable.
