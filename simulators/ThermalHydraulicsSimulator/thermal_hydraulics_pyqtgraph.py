@@ -43,13 +43,15 @@ QTabBar::tab { background:#17232d; padding:7px 13px; } QTabBar::tab:selected { b
 
 ABOUT = """Open Nuclear Engineering Teaching Suite
 
-Created and maintained by maxisnote.
+Interactive desktop simulators for teaching reactor physics, kinetics,
+thermal-hydraulics, LOCA behavior, and core loading concepts.
 
-Questions, feedback, and reports of how the simulator is being used are welcome.
+Author and maintainer: maxisnote20
+Email: maxisnote20@gmail.com
+Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 
-Email: maxisnote2@gmail.com
-
-Thank you for using the Open Nuclear Engineering Teaching Suite."""
+This software is intended for education and demonstration. It must not be
+used for reactor design, licensing, safety analysis, or plant operation."""
 
 SLIDER_SPECS = (
     ("rod", "Rod insertion %", 1), ("trim", "Fine reactivity pcm", 1),

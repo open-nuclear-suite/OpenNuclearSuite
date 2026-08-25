@@ -24,9 +24,7 @@ $commonArgs = @(
     "--windowed",
     "--distpath", $releaseDir,
     "--workpath", $workDir,
-    "--specpath", $specDir,
-    "--add-data", "$projectRoot\assets\UTM.logo.png;.",
-    "--add-data", "$projectRoot\utm.fkt.logo.png;."
+    "--specpath", $specDir
 )
 
 & $python -m PyInstaller @commonArgs `

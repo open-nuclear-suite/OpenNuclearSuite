@@ -9,12 +9,9 @@ import io
 import math
 
 from thermal_hydraulics_simulator import (
-    BANNER_LOGO_FILENAME,
-    SPLASH_LOGO_FILENAME,
     Constants,
     LWRTeachingSimulator,
     State,
-    find_logo_path,
 )
 from steam_properties import SteamTables
 from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
@@ -68,14 +65,6 @@ def advance(model: LWRTeachingSimulator, seconds: float, dt: float = 0.05) -> No
 
 
 class ThermalHydraulicsPhysicsTests(unittest.TestCase):
-    def test_nested_app_directory_resolves_both_branding_images(self) -> None:
-        splash = find_logo_path(SPLASH_LOGO_FILENAME)
-        banner = find_logo_path(BANNER_LOGO_FILENAME)
-        self.assertIsNotNone(splash)
-        self.assertIsNotNone(banner)
-        self.assertTrue(splash.is_file())
-        self.assertTrue(banner.is_file())
-
     def test_nominal_state_remains_at_equilibrium(self) -> None:
         model = make_model()
         advance(model, 100.0)

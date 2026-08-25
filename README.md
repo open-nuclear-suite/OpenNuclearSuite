@@ -161,8 +161,6 @@ exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/R
 |   |-- CODEOWNERS
 |   `-- workflows/
 |       `-- python-checks.yml
-|-- assets/
-|   `-- UTM.logo.png
 |-- docs/
 |   `-- MODEL_LIMITATIONS.md
 |-- simulators/
@@ -205,7 +203,6 @@ exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/R
   **tcl/tk and IDLE** optional feature is selected.
 - **No window appears**: run on a local desktop session rather than a headless
   service, notebook, or remote session without desktop access.
-- **Logo is missing**: keep `assets/UTM.logo.png` in its documented location.
 - **Small display**: use the scrollable panes and maximize the application
   window.
 - **A launcher closes immediately**: open Command Prompt, change to the
@@ -225,11 +222,9 @@ report security issues according to [SECURITY.md](SECURITY.md).
 
 ## Author and contact
 
-**Mohsin Mohd Sies**  
-Nuclear Engineering Program  
-Faculty of Chemical and Energy Engineering  
-Universiti Teknologi Malaysia  
-Email: [mohsin.sies@gmail.com](mailto:mohsin.sies@gmail.com)  
+**maxisnote20**
+
+Email: [maxisnote20@gmail.com](mailto:maxisnote20@gmail.com)
 GitHub: [open-nuclear-suite](https://github.com/open-nuclear-suite)
 
 For academic collaboration, teaching feedback, or questions about the
@@ -243,5 +238,5 @@ a **Cite this repository** option.
 
 ## License
 
-Copyright (c) 2026 Mohsin Mohd Sies. This project is distributed under the
+Copyright (c) 2026 maxisnote20. This project is distributed under the
 [MIT License](LICENSE).

@@ -188,7 +188,7 @@ class Controller(QObject):
     @Property(bool, notify=updated)
     def tripped(self): return bool(self.backend.state.trip)
     @Property(str, constant=True)
-    def bannerUrl(self): return QUrl.fromLocalFile(str(Path(__file__).resolve().parents[2] / "utm.fkt.logo.png")).toString()
+    def bannerUrl(self): return ""
     @Property(float, notify=updated)
     def xMin(self): return max(0.0, self.backend.state.t-40)
     @Property(float, notify=updated)

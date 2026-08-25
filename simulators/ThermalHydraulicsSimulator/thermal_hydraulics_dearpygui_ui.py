@@ -270,9 +270,6 @@ class ThermalHydraulicsDPG:
         dpg.create_context()
         with dpg.texture_registry(tag="textures"):
             pass
-        repository_root = DEFAULT_MODEL_DIR.parents[1]
-        self.load_texture("banner_texture", repository_root / "utm.fkt.logo.png")
-        self.load_texture("splash_texture", repository_root / "assets" / "UTM.logo.png")
         regular_font, bold_font = Path("C:/Windows/Fonts/segoeui.ttf"), Path("C:/Windows/Fonts/segoeuib.ttf")
         with dpg.font_registry():
             if regular_font.exists():
@@ -381,17 +378,17 @@ class ThermalHydraulicsDPG:
                         with dpg.tab(label="Pressure / inventory"):
                             self.make_plot("pressure_plot", "MPa / scaled inventory", (("pressure_series", "Pressure MPa"), ("inventory_series", "Inventory / 10"), ("void_series", "Void / 10")))
 
-        about_message = """Let Us Know Where This Software Is Used
+        about_message = """Open Nuclear Engineering Teaching Suite
 
-We welcome feedback from educators, students, researchers, and other users of Open Nuclear Engineering Teaching Suite.
+Interactive desktop simulators for teaching reactor physics, kinetics,
+thermal-hydraulics, LOCA behavior, and core loading concepts.
 
-Faculty of Chemical and Energy Engineering
-Universiti Teknologi Malaysia
-81310 UTM Skudai, Johor, Malaysia
+Author and maintainer: maxisnote20
+Email: maxisnote20@gmail.com
+Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 
-Email: fcee@utm.my
-
-Developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia."""
+This software is intended for education and demonstration. It must not be
+used for reactor design, licensing, safety analysis, or plant operation."""
         with dpg.window(tag="about_window", label="About — Open Nuclear Engineering Teaching Suite", show=False, modal=True, width=720, height=650):
             dpg.add_input_text(default_value=about_message, multiline=True, readonly=True, width=-1, height=560)
             dpg.add_button(label="CLOSE", callback=lambda *args: dpg.configure_item("about_window", show=False))

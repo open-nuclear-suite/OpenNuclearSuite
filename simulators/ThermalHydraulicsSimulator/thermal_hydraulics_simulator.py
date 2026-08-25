@@ -2,10 +2,8 @@
 """
 LWR Thermal-Hydraulics / LOCA Teaching Simulator - Python version
 -----------------------------------------------------------------
-Author: Mohsin Mohd Sies
-Affiliation: Nuclear Engineering Program, Faculty of Chemical and Energy
-    Engineering, Universiti Teknologi Malaysia
-Contact: mohsin.sies@gmail.com
+Author: maxisnote20
+Contact: maxisnote20@gmail.com
 Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 License: MIT
 
@@ -71,33 +69,18 @@ from matplotlib.figure import Figure
 # ---------------------------------------------------------------------------
 
 PROJECT_NAME = "Open Nuclear Engineering Teaching Suite"
-SPLASH_LOGO_FILENAME = "UTM.logo.png"
-BANNER_LOGO_FILENAME = "utm.fkt.logo.png"
 
-ABOUT_MESSAGE = """Let Us Know Where This Software Is Used
+ABOUT_MESSAGE = """Open Nuclear Engineering Teaching Suite
 
-We would be delighted to hear from educators, students, researchers, and other users of this software.
+Interactive desktop simulators for teaching reactor physics, kinetics,
+thermal-hydraulics, LOCA behavior, and core loading concepts.
 
-Please consider sending us a postcard or a short thank-you email describing:
+Author and maintainer: maxisnote20
+Email: maxisnote20@gmail.com
+Repository: https://github.com/open-nuclear-suite/OpenNuclearSuite
 
-• where you are using the software;
-• how it is being used, such as for teaching, laboratory exercises, demonstrations, or self-study; and
-• any comments or experiences you would like to share.
-
-Postcards may be sent to:
-
-Dean
-Faculty of Chemical and Energy Engineering
-Universiti Teknologi Malaysia
-81310 UTM Skudai
-Johor
-Malaysia
-
-Email: fcee@utm.my
-
-Please mention that the software was developed by the Advanced Nuclear Engineering Research Group (ANERGy), Universiti Teknologi Malaysia.
-
-Your message will help us understand the educational reach of the software and encourage its continued development. Thank you for using our software!"""
+This software is intended for education and demonstration. It must not be
+used for reactor design, licensing, safety analysis, or plant operation."""
 
 
 def show_suite_about(parent: tk.Misc) -> None:
@@ -115,7 +98,7 @@ def show_suite_about(parent: tk.Misc) -> None:
 
     actions = ttk.Frame(window, padding=(16, 10))
     actions.pack(fill=tk.X)
-    ttk.Button(actions, text="EMAIL FCEE", command=lambda: webbrowser.open("mailto:fcee@utm.my")).pack(side=tk.LEFT)
+    ttk.Button(actions, text="EMAIL AUTHOR", command=lambda: webbrowser.open("mailto:maxisnote20@gmail.com")).pack(side=tk.LEFT)
     ttk.Button(actions, text="CLOSE", command=window.destroy).pack(side=tk.RIGHT)
     window.focus_set()
 
@@ -142,7 +125,7 @@ def load_logo_image(
     master: tk.Misc,
     max_width: int,
     max_height: Optional[int] = None,
-    filename: str = BANNER_LOGO_FILENAME,
+    filename: str = "",
 ) -> Optional[tk.PhotoImage]:
     """Load a branding image and fit it proportionally inside a box.
 
@@ -194,20 +177,6 @@ def show_startup_splash(
     border.pack(fill="both", expand=True)
     panel = tk.Frame(border, bg="#15181d", padx=34, pady=24)
     panel.pack(fill="both", expand=True)
-
-    splash.logo_image = load_logo_image(
-        splash,
-        max_width=720,
-        max_height=245,
-        filename=SPLASH_LOGO_FILENAME,
-    )
-    if splash.logo_image is not None:
-        tk.Label(panel, image=splash.logo_image, bg="#15181d", bd=0).pack(pady=(0, 18))
-    else:
-        tk.Label(
-            panel, text="UTM", bg="#7d1238", fg="white",
-            font=("Segoe UI", 34, "bold"), padx=34, pady=8,
-        ).pack(pady=(0, 18))
 
     tk.Label(
         panel, text=PROJECT_NAME, bg="#15181d", fg="#f3f5f7",
@@ -545,16 +514,6 @@ class LWRTeachingSimulator:
             font=("Segoe UI", 9), anchor="w",
         ).pack(anchor="w", pady=(3, 0))
 
-        self.utm_logo_image = load_logo_image(self.root, max_width=800, max_height=80)
-        if self.utm_logo_image is not None:
-            tk.Label(
-                header, image=self.utm_logo_image, bg="#0e1013", bd=0,
-            ).pack(side=tk.RIGHT, padx=(12, 14))
-        else:
-            tk.Label(
-                header, text="UTM", bg="#7d1238", fg="white",
-                font=("Segoe UI", 18, "bold"), padx=18, pady=6,
-            ).pack(side=tk.RIGHT, padx=(12, 14), pady=5)
 
         ttk.Button(header, text="ABOUT", command=lambda: show_suite_about(self.root)).pack(
             side=tk.RIGHT, padx=(4, 0), pady=18,

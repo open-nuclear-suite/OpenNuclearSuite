@@ -245,9 +245,6 @@ class ReactorDPG:
         dpg.create_context()
         with dpg.texture_registry(tag="textures"):
             pass
-        repository_root = DEFAULT_MODEL_DIR.parents[1]
-        self.load_texture("banner_texture", repository_root / "utm.fkt.logo.png")
-        self.load_texture("splash_texture", repository_root / "assets" / "UTM.logo.png")
         regular_font = Path("C:/Windows/Fonts/segoeui.ttf")
         bold_font = Path("C:/Windows/Fonts/segoeuib.ttf")
         with dpg.font_registry():
