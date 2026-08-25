@@ -12,10 +12,13 @@
 > industrial process-control, protection, or safety equipment.
 
 This is a separate hardware integration edition of the Reactor Physics and
-Kinetics Simulator. It imports the canonical validated model and GUI without
-modifying or copying their equations. Physical panel I/O is isolated here.
-Consequently, the 2.0.0 reactor physics, accessibility, responsive GUI, and
-operator-facing control-rod insertion convention are shared automatically.
+Kinetics Simulator. Its default interface now subclasses the responsive 2.0
+PySide6/PyQtGraph reactor window and uses the same GUI-neutral backend, fixed
+physics timestep, GPU plots, diagnostics, settings, faults, and SCRAM model.
+Physical panel I/O remains isolated on a serial worker thread and panel
+commands are translated through a tested backend adapter.
+
+The former Tkinter hardware interface remains available with `--legacy-tk`.
 
 > **Educational use only.** This project is not a reactor protection system,
 > safety instrument, plant simulator, or design for connection to real plant

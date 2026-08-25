@@ -22,6 +22,9 @@ updates so interactive controls and resizing remain responsive under load.
   worth, with fault-aware behavior and persistent decay heat.
 - Expanded regression coverage for model controls, scenarios, responsiveness,
   feedback convergence, and GUI-neutral backends.
+- The optional hardware-panel edition now shares the responsive reactor
+  frontend and GUI-neutral backend by default; its physical build and firmware
+  remain explicitly untested.
 
 The Hardware Reactor Control Panel remains explicitly untested hardware and is
 not validated for connection to real equipment. All simulators remain
