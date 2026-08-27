@@ -35,6 +35,24 @@ class SteamPropertyTests(unittest.TestCase):
         self.assertAlmostEqual(state.density_kg_m3, 740.4695404, places=3)
         self.assertAlmostEqual(state.internal_energy_kj_kg, 1279.0794910, places=4)
 
+    def test_transport_properties_match_if97_generation_reference(self) -> None:
+        enthalpy = self.tables.enthalpy_pt(15.5, 290.0)
+        transport = self.tables.transport_ph(15.5, enthalpy)
+        self.assertAlmostEqual(transport.viscosity_Pa_s, 9.24874e-5, delta=2.0e-8)
+        self.assertAlmostEqual(transport.conductivity_W_mK, 0.579207, delta=2.0e-4)
+        self.assertAlmostEqual(transport.surface_tension_N_m, 0.00466908, delta=2.0e-6)
+        self.assertEqual(transport.basis, "compressed-liquid")
+
+    def test_two_phase_transport_requires_phase_basis(self) -> None:
+        saturation = self.tables.saturation_at_pressure(7.0)
+        enthalpy = 0.5 * (saturation.hf_kj_kg + saturation.hg_kj_kg)
+        liquid = self.tables.transport_ph(7.0, enthalpy, "saturated-liquid")
+        vapor = self.tables.transport_ph(7.0, enthalpy, "saturated-vapor")
+        self.assertGreater(liquid.viscosity_Pa_s, vapor.viscosity_Pa_s)
+        self.assertGreater(liquid.conductivity_W_mK, vapor.conductivity_W_mK)
+        with self.assertRaises(ValueError):
+            self.tables.transport_ph(7.0, enthalpy, "mixture")
+
     def test_off_grid_interpolation_against_if97_generation_references(self) -> None:
         references = (
             # pressure, enthalpy, temperature, density, internal energy

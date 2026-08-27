@@ -46,6 +46,14 @@ class WaterState:
     phase: str
 
 
+@dataclass(frozen=True)
+class TransportState:
+    viscosity_Pa_s: float
+    conductivity_W_mK: float
+    surface_tension_N_m: float
+    basis: str
+
+
 class SteamTables:
     """Bilinear pressure-enthalpy interpolation over bundled IF97 values."""
 
@@ -57,6 +65,10 @@ class SteamTables:
             self.volume = data["specific_volume_m3_kg"]
             self.internal_energy = data["internal_energy_kj_kg"]
             self.cp = data["cp_kj_kgK"]
+            self.viscosity = data["viscosity_Pa_s"] if "viscosity_Pa_s" in data else None
+            self.conductivity = (
+                data["conductivity_W_mK"] if "conductivity_W_mK" in data else None
+            )
             self.sat_temperature = data["sat_temperature_C"]
             self.sat_hf = data["sat_hf"]
             self.sat_hg = data["sat_hg"]
@@ -66,6 +78,14 @@ class SteamTables:
             self.sat_ug = data["sat_ug"]
             self.sat_cpf = data["sat_cpf"]
             self.sat_cpg = data["sat_cpg"]
+            self.sat_muf = data["sat_muf_Pa_s"] if "sat_muf_Pa_s" in data else None
+            self.sat_mug = data["sat_mug_Pa_s"] if "sat_mug_Pa_s" in data else None
+            self.sat_kf = data["sat_kf_W_mK"] if "sat_kf_W_mK" in data else None
+            self.sat_kg = data["sat_kg_W_mK"] if "sat_kg_W_mK" in data else None
+            self.sat_surface_tension = (
+                data["sat_surface_tension_N_m"]
+                if "sat_surface_tension_N_m" in data else None
+            )
             self.source = str(data["source"])
             self.formulation = str(data["formulation"])
             self.generator_version = str(data["generator_version"])
@@ -125,6 +145,52 @@ class SteamTables:
     def saturation_pressure(self, temperature_C: float) -> float:
         temperature = self._check(temperature_C, self.sat_temperature, "temperature_C")
         return self._linear(self.sat_temperature, self.pressures, temperature)
+
+    def transport_ph(
+        self, pressure_mpa: float, enthalpy_kj_kg: float,
+        two_phase_basis: str = "saturated-liquid",
+    ) -> TransportState:
+        """Return bounded IF97-backend transport properties.
+
+        Two-phase mixture viscosity and conductivity are not uniquely defined;
+        callers must use the saturated-liquid or saturated-vapor phase basis.
+        """
+        if self.viscosity is None or self.conductivity is None:
+            raise PropertyRangeError("transport-property arrays are not present in this table")
+        pressure = self._check(pressure_mpa, self.pressures, "pressure_mpa")
+        enthalpy = self._check(enthalpy_kj_kg, self.enthalpies, "enthalpy_kj_kg")
+        saturation = self.saturation_at_pressure(pressure)
+        surface_tension = self._linear(
+            self.pressures, self.sat_surface_tension, pressure
+        )
+        if saturation.hf_kj_kg <= enthalpy <= saturation.hg_kj_kg:
+            if two_phase_basis not in ("saturated-liquid", "saturated-vapor"):
+                raise ValueError("two_phase_basis must be saturated-liquid or saturated-vapor")
+            liquid = two_phase_basis == "saturated-liquid"
+            viscosity_values = self.sat_muf if liquid else self.sat_mug
+            conductivity_values = self.sat_kf if liquid else self.sat_kg
+            return TransportState(
+                self._linear(self.pressures, viscosity_values, pressure),
+                self._linear(self.pressures, conductivity_values, pressure),
+                surface_tension,
+                two_phase_basis,
+            )
+        viscosity = self._bilinear(self.viscosity, pressure, enthalpy)
+        conductivity = self._bilinear(self.conductivity, pressure, enthalpy)
+        if not np.isfinite(viscosity) or not np.isfinite(conductivity):
+            # A rectangular p-h interpolation stencil may straddle the curved
+            # saturation boundary even though the requested state is single
+            # phase. Transport properties approach their phase saturation
+            # values continuously, so use that bounded one-sided limit.
+            liquid = enthalpy < saturation.hf_kj_kg
+            viscosity_values = self.sat_muf if liquid else self.sat_mug
+            conductivity_values = self.sat_kf if liquid else self.sat_kg
+            viscosity = self._linear(self.pressures, viscosity_values, pressure)
+            conductivity = self._linear(self.pressures, conductivity_values, pressure)
+            basis = "compressed-liquid-saturation-limit" if liquid else "superheated-vapor-saturation-limit"
+            return TransportState(viscosity, conductivity, surface_tension, basis)
+        basis = "compressed-liquid" if enthalpy < saturation.hf_kj_kg else "superheated-vapor"
+        return TransportState(viscosity, conductivity, surface_tension, basis)
 
     def state_ph(self, pressure_mpa: float, enthalpy_kj_kg: float) -> WaterState:
         pressure = self._check(pressure_mpa, self.pressures, "pressure_mpa")

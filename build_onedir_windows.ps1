@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = Join-Path $projectRoot ".build-venv\Scripts\python.exe"
-$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows-Onedir"
+$releaseDir = Join-Path $projectRoot "release\Open-Nuclear-Engineering-Teaching-Suite-2.1.0-Windows-Onedir"
 $workDir = Join-Path $projectRoot "build\onedir"
 $specDir = Join-Path $projectRoot "build-specs\onedir"
 $env:QT_API = "pyside6"
@@ -47,6 +47,17 @@ $commonArgs = @(
     "$projectRoot\simulators\CoreLoadingSimulator\main.py"
 
 & $python -m PyInstaller @commonArgs `
+    --name "Subchannel-Thermal-Hydraulics-Laboratory" `
+    --paths "$projectRoot" `
+    --paths "$projectRoot\simulators\ThermalHydraulicsSimulator" `
+    --add-data "$projectRoot\simulators\ThermalHydraulicsSimulator\data\if97_ph_table.npz;data" `
+    --add-data "$projectRoot\simulators\SubchannelLaboratory\2006LUTdata.txt;simulators\SubchannelLaboratory" `
+    --add-data "$projectRoot\simulators\SubchannelLaboratory\GROENEVELD_DATA_LICENSE.txt;simulators\SubchannelLaboratory" `
+    --add-data "$projectRoot\simulators\SubchannelLaboratory\groeneveld_uncertainty.csv;simulators\SubchannelLaboratory" `
+    --exclude-module pandas --exclude-module scipy --exclude-module pyarrow --exclude-module PyQt5 `
+    "$projectRoot\simulators\SubchannelLaboratory\main.py"
+
+& $python -m PyInstaller @commonArgs `
     --name "Hardware-Reactor-Control-Panel-UNTESTED" `
     --paths "$projectRoot\simulators\HardwareReactorControlPanel" `
     --paths "$projectRoot\simulators\ReactorPhysicsSimulator" `
@@ -64,6 +75,7 @@ $executables = @(
     (Join-Path $releaseDir "Reactor-Physics-and-Kinetics-Simulator\Reactor-Physics-and-Kinetics-Simulator.exe"),
     (Join-Path $releaseDir "Thermal-Hydraulics-and-LOCA-Simulator\Thermal-Hydraulics-and-LOCA-Simulator.exe"),
     (Join-Path $releaseDir "Core-Loading-Simulator\Core-Loading-Simulator.exe"),
+    (Join-Path $releaseDir "Subchannel-Thermal-Hydraulics-Laboratory\Subchannel-Thermal-Hydraulics-Laboratory.exe"),
     (Join-Path $releaseDir "Hardware-Reactor-Control-Panel-UNTESTED\Hardware-Reactor-Control-Panel-UNTESTED.exe")
 )
 
