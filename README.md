@@ -1,6 +1,6 @@
 # Open Nuclear Engineering Teaching Suite
 
-A collection of three interactive desktop simulators plus an optional hardware
+A collection of four interactive desktop simulators plus an optional hardware
 control-panel edition for teaching introductory
 reactor physics, core loading, and light-water-reactor thermal-hydraulics. The applications use
 Python, PySide6, PyQtGraph, NumPy, and OpenGL. The former Tkinter interfaces
@@ -18,6 +18,7 @@ remain available as compatibility front ends.
 | Reactor Physics and Kinetics | Point kinetics, reactivity balance, nonlinear rod worth, Xe/Sm poisoning, source-range startup, feedback, teaching-cycle exposure, load following, trips, and fault injection | `simulators/ReactorPhysicsSimulator/main.py` |
 | Hardware Reactor Control Panel | Separate USB-serial integration edition for a student-built physical teaching panel; reuses the reactor physics model | `simulators/HardwareReactorControlPanel/main.py` |
 | Thermal-Hydraulics and LOCA | Coolant inventory, pressure, decay heat, heat removal, ECCS, SBLOCA/LBLOCA, loss of flow, loss of heat sink, and station blackout | `simulators/ThermalHydraulicsSimulator/main.py` |
+| Subchannel Laboratory | Progressive single-channel correlation comparison, boiling and void models, axial CHF margin, and statistical hot-channel factors | `simulators/SubchannelLaboratory/main.py` |
 | Core Loading Simulator | 11 x 11 loading patterns, two-group diffusion, burnup, fuel management, assembly histories, and guided multi-cycle refueling | `simulators/CoreLoadingSimulator/main.py` |
 
 The simulators provide interactive controls, trend plots, classroom scenarios,
@@ -85,11 +86,18 @@ python simulators/ThermalHydraulicsSimulator/main.py
 or:
 
 ```cmd
+python simulators/SubchannelLaboratory/main.py
+```
+
+or:
+
+```cmd
 python simulators/CoreLoadingSimulator/main.py
 ```
 
 After setup, Windows users can instead double-click
-`run_reactor_simulator.bat`, `run_thermal_hydraulics_simulator.bat`, or
+`run_reactor_simulator.bat`, `run_thermal_hydraulics_simulator.bat`,
+`run_subchannel_laboratory.bat`, or
 `run_core_loading_simulator.bat`.
 
 The optional physical-panel edition has its own dependency and launcher:
@@ -121,7 +129,7 @@ From PowerShell on Windows, run:
 
 The script creates one-file, windowed executables for the three simulators and
 the explicitly labelled untested hardware-panel edition under
-`release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows`. The release
+`release\Open-Nuclear-Engineering-Teaching-Suite-2.1.0-Windows`. The release
 also includes the license, citation metadata, Windows instructions, and
 SHA-256 checksums. End users do not need Python installed.
 
@@ -132,7 +140,7 @@ For faster startup, build folder-based editions instead:
 ```
 
 These are created under
-`release\Open-Nuclear-Engineering-Teaching-Suite-2.0.0-Windows-Onedir`.
+`release\Open-Nuclear-Engineering-Teaching-Suite-2.1.0-Windows-Onedir`.
 Each simulator's executable must remain beside its `_internal` folder, but it
 starts faster because bundled components do not need to be unpacked on every
 launch. The build also creates a ZIP of the complete folder-based release for
@@ -179,6 +187,13 @@ exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/R
 |   |   |-- thermal_hydraulics_simulator.py
 |   |   |-- test_thermal_hydraulics_physics.py
 |   |   `-- README.md
+|   |-- SubchannelLaboratory/
+|   |   |-- main.py
+|   |   |-- single_channel.py
+|   |   |-- chf_correlations.py
+|   |   |-- pyqtgraph_handler.py
+|   |   |-- test_single_channel.py
+|   |   `-- README.md
 |-- .gitignore
 |-- AUTHORS.md
 |-- CITATION.cff
@@ -187,6 +202,7 @@ exports; see the [reactor simulator README](simulators/ReactorPhysicsSimulator/R
 |-- README.md
 |-- run_core_loading_simulator.bat
 |-- run_reactor_simulator.bat
+|-- run_subchannel_laboratory.bat
 |-- run_thermal_hydraulics_simulator.bat
 |-- SECURITY.md
 |-- setup_windows.bat

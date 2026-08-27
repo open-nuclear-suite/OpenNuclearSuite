@@ -1,10 +1,11 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.0.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.1.0
 Windows standalone release
 
-This folder contains three independent simulators and one optional hardware-panel edition:
+This folder contains four independent simulators and one optional hardware-panel edition:
 
   Reactor-Physics-and-Kinetics-Simulator.exe
   Thermal-Hydraulics-and-LOCA-Simulator.exe
+  Subchannel-Thermal-Hydraulics-Laboratory.exe
   Core-Loading-Simulator.exe
   Hardware-Reactor-Control-Panel-UNTESTED.exe
 

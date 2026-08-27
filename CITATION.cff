@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "Open Nuclear Engineering Teaching Suite"
 type: software
-version: 2.0.0
-date-released: 2026-08-25
+version: 2.1.0
+date-released: 2026-08-27
 authors:
   - name: "maxisnote20"
     affiliation: "Independent developer"
@@ -13,7 +13,7 @@ license: MIT
 abstract: >-
   Responsive Windows desktop simulators for teaching reactor physics,
   kinetics, core loading and fuel management, light-water-reactor
-  thermal-hydraulics, and LOCA behavior.
+  thermal-hydraulics, LOCA behavior, and progressive subchannel analysis.
 keywords:
   - nuclear engineering education
   - reactor physics

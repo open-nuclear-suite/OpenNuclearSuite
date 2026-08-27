@@ -1,4 +1,4 @@
-OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.0.0
+OPEN NUCLEAR ENGINEERING TEACHING SUITE 2.1.0
 Windows faster-starting folder release
 
 Each simulator has its own folder. Open the appropriate folder and run:
@@ -8,6 +8,9 @@ Each simulator has its own folder. Open the appropriate folder and run:
 
   Thermal-Hydraulics-and-LOCA-Simulator\
     Thermal-Hydraulics-and-LOCA-Simulator.exe
+
+  Subchannel-Thermal-Hydraulics-Laboratory\
+    Subchannel-Thermal-Hydraulics-Laboratory.exe
 
   Core-Loading-Simulator\
     Core-Loading-Simulator.exe

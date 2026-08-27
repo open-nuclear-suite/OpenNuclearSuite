@@ -38,7 +38,10 @@ def generate() -> None:
     )
     enthalpy_kj_kg = np.linspace(100.0, 3600.0, 351)
 
-    sat_names = ("temperature_C", "hf", "hg", "vf", "vg", "uf", "ug", "cpf", "cpg")
+    sat_names = (
+        "temperature_C", "hf", "hg", "vf", "vg", "uf", "ug", "cpf", "cpg",
+        "muf_Pa_s", "mug_Pa_s", "kf_W_mK", "kg_W_mK", "surface_tension_N_m",
+    )
     saturation = {name: np.empty(pressure_mpa.size) for name in sat_names}
     for i, pressure in enumerate(pressure_mpa):
         saturation["temperature_C"][i] = prop("T", pressure, "Q", 0.0) - 273.15
@@ -50,12 +53,19 @@ def generate() -> None:
         saturation["ug"][i] = prop("U", pressure, "Q", 1.0) / 1000.0
         saturation["cpf"][i] = prop("C", pressure, "Q", 0.0) / 1000.0
         saturation["cpg"][i] = prop("C", pressure, "Q", 1.0) / 1000.0
+        saturation["muf_Pa_s"][i] = prop("VISCOSITY", pressure, "Q", 0.0)
+        saturation["mug_Pa_s"][i] = prop("VISCOSITY", pressure, "Q", 1.0)
+        saturation["kf_W_mK"][i] = prop("CONDUCTIVITY", pressure, "Q", 0.0)
+        saturation["kg_W_mK"][i] = prop("CONDUCTIVITY", pressure, "Q", 1.0)
+        saturation["surface_tension_N_m"][i] = prop("SURFACE_TENSION", pressure, "Q", 0.0)
 
     shape = (pressure_mpa.size, enthalpy_kj_kg.size)
     temperature_C = np.empty(shape)
     specific_volume = np.empty(shape)
     internal_energy_kj_kg = np.empty(shape)
     cp_kj_kgK = np.empty(shape)
+    viscosity_Pa_s = np.empty(shape)
+    conductivity_W_mK = np.empty(shape)
 
     for i, pressure in enumerate(pressure_mpa):
         hf, hg = saturation["hf"][i], saturation["hg"][i]
@@ -65,8 +75,12 @@ def generate() -> None:
             internal_energy_kj_kg[i, j] = prop("U", pressure, "H", enthalpy * 1000.0) / 1000.0
             if hf < enthalpy < hg:
                 cp_kj_kgK[i, j] = np.nan
+                viscosity_Pa_s[i, j] = np.nan
+                conductivity_W_mK[i, j] = np.nan
             else:
                 cp_kj_kgK[i, j] = prop("C", pressure, "H", enthalpy * 1000.0) / 1000.0
+                viscosity_Pa_s[i, j] = prop("VISCOSITY", pressure, "H", enthalpy * 1000.0)
+                conductivity_W_mK[i, j] = prop("CONDUCTIVITY", pressure, "H", enthalpy * 1000.0)
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -77,6 +91,8 @@ def generate() -> None:
         specific_volume_m3_kg=specific_volume,
         internal_energy_kj_kg=internal_energy_kj_kg,
         cp_kj_kgK=cp_kj_kgK,
+        viscosity_Pa_s=viscosity_Pa_s,
+        conductivity_W_mK=conductivity_W_mK,
         source=np.array("IAPWS-IF97 via CoolProp IF97::Water"),
         generator_version=np.array(f"CoolProp {CoolProp.__version__}"),
         formulation=np.array("IAPWS R7-97(2012)"),
