@@ -1,0 +1,8 @@
+plant,case,time_s,power_fraction,pressure_MPa,inventory_fraction,core_flow_fraction,trip,interpretation
+PWR,NORMAL,30,1.000000,15.500000,1.000000,,0,nominal equilibrium snapshot
+BWR,NORMAL,30,1.000001,7.000000,1.000000,1.000000,0,source-parameterized nominal equilibrium
+BWR,RECIRC_TRIP,30,0.070217,9.128030,1.069351,0.324718,1,unmitigated trip and SRV response
+BWR,TURBINE_TRIP,15,0.055717,7.702259,0.917801,0.824809,1,scram with SRV pressure control
+BWR,LOFW,30,0.303510,7.547602,0.798993,0.996223,1,low-level protection response
+BWR,SBLOCA,30,0.028871,8.205942,0.833422,0.523495,1,sourced RCIC point with break and SRV discharge
+BWR,SBO,30,0.030493,9.299259,0.873661,0.392634,1,coastdown sourced RCIC point and pool heatup

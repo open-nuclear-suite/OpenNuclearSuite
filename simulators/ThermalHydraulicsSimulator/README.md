@@ -16,6 +16,8 @@ repository root.
 
 ## Main capabilities
 
+- Selectable representative PWR and independent BWR plant models
+
 - Normal operation, SBLOCA, LBLOCA, LOFA, loss-of-heat-sink, and SBO presets
 - Coupled six-group point kinetics and three-group decay heat
 - Lumped fuel, cladding, primary coolant mass, and coolant energy states
@@ -26,6 +28,7 @@ repository root.
 - Latched automatic ECCS demand with recovery hysteresis to prevent threshold chatter
 - Steam-generator, AFW, PORV, spray, heater, and RHR controls
 - Scripted recovery demonstrations and CSV transient logging
+- Deduplicated demo action/recovery log with timestamped control movements
 - Timestamped event timeline for protection, ECCS, inventory, CHF, boiling,
   thermal-limit, recovery, and scenario transitions
 - Independently scaled reactor-power and decay-heat axes for readable post-trip trends
@@ -37,6 +40,113 @@ repository root.
 - Accessible scenario summaries and extended transient CSV diagnostics
 - GUI-independent physics engine integrated with projected classical RK4
 - Bundled pressure-enthalpy IF97 property table with no runtime property-package dependency
+
+## BWR extension status
+
+The responsive PyQtGraph interface includes always-visible, mutually exclusive
+**PWR** and **BWR** plant-model radio buttons. PWR
+mode retains the existing transient and accident capabilities. The BWR model
+is a 37-state R9 source-parameterized feature prototype with explicit core-liquid, core-vapor, downcomer-liquid,
+upper-plenum, separator, and steam-dome mass and stored-energy balances. Vessel
+pressure is closed against saturated-steam specific volume and total vessel geometry,
+mass, and internal energy through a simultaneous saturated flash. It includes direct steam and
+feedwater flows, a pump head-flow/density-driving/component-loss recirculation
+momentum balance, bulk void,
+void-reactivity feedback, and automatic/manual SRV discharge.
+
+The responsive interface substitutes BWR controls and a BWR vessel mimic with
+bottom-entry control-rod position when BWR is selected. Initial scenarios and
+scripted demonstrations cover recirculation-pump trip, turbine trip/SRV
+response, loss-of-feedwater recovery, small-break LOCA, and station blackout.
+The BWR safety/support panel includes MSIVs, turbine bypass, RCIC, HPCI, ADS,
+LPCI, core spray, shutdown cooling, and a vessel-break input. Injection and
+depressurization are pressure dependent. RCIC/HPCI include separate steam-driver
+availability and quadratic head-flow curves; LPCI/core spray flow is zero above
+generic pump shutoff head. Vessel break flow uses a backpressure-aware,
+isentropic homogeneous-equilibrium flashing-nozzle calculation. The equivalent
+break area, discharge coefficient, runout flows, and shutoff heads are generic
+teaching inputs, not qualified plant curves. Low-level automatic demand stages
+high-pressure and low-pressure systems. The display distinguishes collapsed
+liquid inventory from a teaching swell-adjusted indicated level and tracks
+suppression-pool temperature.
+Automatic protection and injection use explicit delays, latched demands, recovery
+hysteresis, pressure/level permissives, operator-selectable equipment availability,
+and suppression-pool suction limits. Pool mass and energy are integrated, including
+SRV/RCIC steam return and safety-system withdrawal.
+
+The generic BWR RPS has independently timed high-flux, high-pressure, low
+indicated-level, and guarded fuel-thermal channels. The interface annunciates
+the retained initiating cause. ECCS and ADS thresholds, delays, reset
+hysteresis, and pressure permissives are declared model constants rather than
+embedded literals; automatic ADS also requires an available low-pressure
+injection path.
+
+The BWR readout exposes recirculation pump and buoyancy heads together with
+core two-phase friction, other single-phase/local loss, acceleration loss, and
+the active two-phase friction multiplier. Natural-circulation flow is solved by
+the momentum balance rather than imposed as a fixed minimum.
+
+Four dynamic axial zones redistribute total core power and vapor holdup without
+duplicating vessel mass or energy. Local void is reconstructed from the conserved
+phase inventories, contributes through an importance-weighted void-reactivity
+signal, and shifts with flow-dependent upward transport. Bottom-entry rod
+insertion and local void feedback reshape axial power. That shape is interpolated
+into the 24-node critical-power inspector, and axial power/void shares are visible
+in the main BWR readout.
+
+All scripted demonstrations show a declared target end state plus a timestamped
+stabilization log of the actual control and safety-system movements. "Recovery"
+means reaching that target controlled condition; only the recirculation-trip
+demonstration targets a return to power operation.
+
+BWR mode also provides a separate 24-node axial-channel inspector. It marches
+pressure and enthalpy, reports equilibrium quality and void, calculates fuel
+and cladding temperature profiles, and displays a guarded CISE-style X-L
+critical-power trend. Pressure loss includes friction, spacer, gravity, and
+acceleration terms. Valid in-range CPR drives a bounded nucleate/transition/
+film-boiling heat-transfer factor in both the axial temperature display and the
+lumped cladding stored-energy balance; out-of-range CPR remains explicitly
+uncoupled. The method and applicability guards are documented in the
+[BWR critical-power method](../../docs/BWR_CRITICAL_POWER_METHOD.md). It remains
+a teaching screening method rather than a licensed fuel-design limit.
+
+Capability maturity is explicit rather than implied:
+
+| BWR capability | Status |
+|---|---|
+| Vessel balances and direct cycle | Implemented |
+| Recirculation head balance and reference-leg lag | Implemented |
+| Safety latches/delays/availability and suppression-pool balance | Implemented |
+| Void feedback, component curves, and level calibration | Teaching surrogate |
+| Axial-channel inspector | Diagnostic only |
+| Upper-plenum/separator storage | Implemented |
+| Separator transport and level indication | Teaching surrogate |
+| Guarded open X-L critical-power screening | Diagnostic only |
+| Fuel-vendor/validated safety-limit MCPR | Not implemented |
+
+The sequencing authority and exit criteria are recorded in the
+[BWR development roadmap](../../docs/BWR_DEVELOPMENT_ROADMAP.md). Each completed
+BWR step also publishes mass- and energy-balance residuals, and displayed flows
+come from the same final right-hand-side evaluation used by the integrator.
+The recirculation slider commands pump speed rather than core flow; the interface
+shows pump, buoyancy, and friction heads alongside geometry-derived collapsed and
+reference-leg-adjusted indicated levels.
+
+R7 revalidated broad regression envelopes for normal operation, recirculation
+trip, turbine trip, loss of feedwater, small-break LOCA, and station blackout;
+see the [BWR scenario calibration basis](../../docs/BWR_SCENARIO_CALIBRATION.md).
+The three recovery demonstrations also have executable numerical end-state
+gates. These are generic teaching-surrogate checks, not plant validation.
+
+R8 adds deterministic timestep and plus/minus 20% local-sensitivity screening.
+After R9 replaced the supported hydraulic data, reference-leg/level trip timing
+and void reactivity are the largest remaining screened dependencies. See
+[BWR uncertainty and sensitivity screening](../../docs/BWR_UNCERTAINTY_SENSITIVITY.md).
+
+R9 replaces the supported rated-state, effective core pressure-drop, RCIC/HPCI
+operating-point, and steam-driver cutoff inputs with public OECD/NEA and NRC
+data. Unsupported coefficients remain explicitly generic; see the
+[BWR public parameter-data basis](../../docs/BWR_PARAMETER_DATA_BASIS.md).
 
 ## Numerical and property foundation
 
@@ -130,11 +240,29 @@ and evaporation inventory-loss rates.
 
 Physics integration is separated from display work. The main dashboard redraws
 at no more than 10 Hz and the heavier hot-channel plots/table at no more than
-4 Hz; numerical substeps continue at their configured timestep. Axial states
+4 Hz; numerical substeps continue at their configured timestep. Above 1x speed,
+the diagnostic axial-channel interval is scaled with simulation speed so it
+remains capped near four solves per wall-clock second instead of consuming the
+GUI event loop at 5x or 10x. Axial states
 that temporarily leave the property/correlation domain during a severe LOCA are
 cached as unavailable and retried at the normal 0.25 s channel interval instead
 of on every RK4 substep. History and event collections remain bounded at 1600
 samples and 250 events respectively.
+
+The process controls remain manual. **Auto ECCS logic** / **Auto BWR safety
+systems** and **Auto reactor trip** enable protection responses rather than a
+full-power automatic plant controller. The BWR main-steam and feedwater demand
+sliders do, however, retain simplified fast inner pressure and vessel-inventory
+regulators. These represent normal valve/flow control loops and allow a control-
+rod maneuver to reach a stable part-power state instead of creating a spurious
+pressure and level mismatch. In BWR mode, an unchecked availability box blocks
+both automatic and manual flow from that system; its command slider is disabled
+to show that the command cannot take effect.
+
+In the hot-channel plot, **Thermal limit** is the calculated local CHF or
+critical-power threshold, not a temperature. Dividing that threshold by actual
+surface heat flux gives DNBR for the PWR channel and the teaching model's
+diagnostic CPR margin for the BWR channel. A margin of 1.0 is the modeled limit.
 
 Automatic ECCS demand is latched while a LOCA remains active. It can increase
 from 35% to 85% or 100% as conditions deteriorate, but it does not repeatedly

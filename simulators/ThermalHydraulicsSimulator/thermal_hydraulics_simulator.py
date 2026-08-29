@@ -45,6 +45,9 @@ import numpy as np
 from steam_properties import SteamTables
 from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
 from hot_channel import HotChannelModel, HotChannelResult
+from bwr_hot_channel import BWRHotChannelModel
+from bwr_plant_model import BWRControlInputs
+from plant_models import create_plant_model
 
 try:
     from PIL import Image, ImageTk
@@ -222,6 +225,9 @@ class Constants:
     TrefCool: float = 305.0
     Pref: float = 15.5
     Mref: float = 1.0
+    plant_type: str = "PWR"
+    plant_label: str = "Representative PWR"
+    pressure_reference_temperature_C: float = 344.7915516
 
     # 6-group delayed neutron data, representative U-235 thermal spectrum.
     beta_i: np.ndarray = field(
@@ -291,6 +297,127 @@ class Constants:
     @property
     def Ksg_nom(self) -> float:
         return self.Pnom_MW / (self.TrefCool - self.Tsink)
+
+
+@dataclass
+class BWRConstants(Constants):
+    """Declared phase-1 reference values for a representative BWR equilibrium."""
+
+    plant_type: str = "BWR"
+    plant_label: str = "Representative BWR"
+    # OECD/NEA Peach Bottom-2 BWR/4 benchmark rated reference quantities.
+    # This remains a representative teaching model, not a Peach Bottom model.
+    Pnom_MW: float = 3293.0
+    Tsink: float = 275.0
+    TrefFuel: float = 800.0
+    TrefClad: float = 300.0
+    TrefCool: float = 285.830022805751
+    # BWR fuel heat storage is kept distinct from the deliberately slow PWR
+    # classroom surrogate. This gives an approximately 53 s fuel-to-clad time
+    # constant at rated conditions and prevents minute-scale feedback lag from
+    # manufacturing undamped rod-step power oscillations.
+    Cfuel: float = 350.0
+    Pref: float = 7.0
+    pressure_reference_temperature_C: float = 285.830022805751
+    alpha_m: float = -1.0e-5
+    cladWarn: float = 650.0
+    pressHigh: float = 7.8
+    alpha_void: float = -0.035
+    bwr_liquid_inventory_kg: float = 300000.0
+    bwr_core_inventory_fraction: float = 0.36
+    bwr_downcomer_inventory_fraction: float = 0.50
+    bwr_upper_plenum_inventory_fraction: float = 0.09
+    bwr_separator_inventory_fraction: float = 0.05
+    bwr_steam_dome_volume_m3: float = 105.0
+    bwr_upper_plenum_residence_s: float = 0.8
+    bwr_separator_residence_s: float = 1.2
+    bwr_core_vapor_residence_s: float = 1.8
+    bwr_level_span_m: float = 5.0
+    bwr_reference_core_flow_kg_s: float = 12915.0
+    # 191.17 C benchmark feedwater at 7 MPa mapped through the bundled IF97
+    # table: hf,sat - h(P,T) = 452.09 kJ/kg.
+    bwr_feedwater_subcooling_kJ_kg: float = 452.09
+    bwr_natural_circulation_fraction: float = 0.22
+    bwr_recirc_tau_s: float = 4.0
+    # The benchmark measured 151.685 kPa rated core pressure drop. Converted
+    # with the model's 7 MPa saturated-liquid density this is 20.90 m. The
+    # actual 216.4 m external recirculation-pump head drives jet pumps and is
+    # therefore not inserted directly into this reduced effective-core loop.
+    bwr_loop_loss_head_m: float = 20.90
+    # Curve shape/shutoff ratio remains generic pending a public pump curve.
+    bwr_pump_shutoff_head_m: float = 23.65
+    bwr_pump_reference_head_m: float = 17.996
+    bwr_reference_buoyancy_head_m: float = 2.904
+    # Of the measured core drop, 124.105 kPa (17.10 m) is the support plate;
+    # the 3.80 m remainder is represented as bundle/two-phase core friction.
+    bwr_core_friction_head_ref_m: float = 3.80
+    bwr_single_phase_loss_head_ref_m: float = 17.10
+    bwr_acceleration_head_ref_m: float = 0.0
+    bwr_reference_leg_tau_s: float = 25.0
+    bwr_reference_leg_sensitivity: float = 0.35
+    bwr_void_tau_s: float = 1.5
+    # Proportional pressure and level regulators represent the fast inner
+    # control loops that keep a rod-induced load change from becoming an
+    # artificial pressure/inventory transient. Operator sliders remain demand
+    # limits rather than raw, fixed valve/flow positions.
+    bwr_pressure_regulator_gain: float = 10.0
+    bwr_feedwater_regulator_gain: float = 10.0
+    bwr_srv_open_mpa: float = 7.55
+    bwr_srv_capacity_kg_s: float = 3200.0
+    # Quadratic-curve runout equivalents. They reproduce approximately 600 gpm
+    # RCIC and 5000 gpm HPCI at 7 MPa with the retained generic 10 MPa shutoff.
+    bwr_rcic_capacity_kg_s: float = 68.0
+    bwr_hpci_capacity_kg_s: float = 566.0
+    bwr_lpci_capacity_kg_s: float = 4200.0
+    bwr_core_spray_capacity_kg_s: float = 2300.0
+    # Generic screening curves, not plant-specific certified pump data.  The
+    # capacity is the zero-differential-pressure runout flow; injection stops
+    # when vessel-to-pool differential pressure reaches shutoff pressure.
+    bwr_rcic_shutoff_head_mpa: float = 10.0
+    bwr_hpci_shutoff_head_mpa: float = 10.0
+    bwr_lpci_shutoff_head_mpa: float = 2.0
+    bwr_core_spray_shutoff_head_mpa: float = 2.5
+    bwr_rcic_driver_min_mpa: float = 0.52
+    bwr_hpci_driver_min_mpa: float = 0.52
+    bwr_driver_full_mpa: float = 1.5
+    bwr_suppression_pool_pressure_mpa: float = 0.10
+    bwr_suction_inventory_fraction_min: float = 0.20
+    # Full break is an equivalent sharp-edged opening. Flow is calculated by
+    # an isentropic homogeneous-equilibrium flashing nozzle, not this value.
+    bwr_break_area_m2: float = 0.020
+    bwr_break_discharge_coefficient: float = 0.80
+    bwr_break_backpressure_mpa: float = 0.10
+    bwr_bypass_capacity_kg_s: float = 1900.0
+    bwr_pool_mass_kg: float = 2.5e6
+    bwr_pool_cp_kJ_kgK: float = 4.18
+    bwr_min_coolant_heat_transfer_factor: float = 0.04
+    # Generic teaching protection/actuation settings. These are deliberately
+    # declared inputs, not technical-specification values for any plant.
+    bwr_rps_high_flux_fraction: float = 1.18
+    bwr_rps_high_flux_delay_s: float = 0.10
+    bwr_rps_high_pressure_mpa: float = 7.80
+    bwr_rps_high_pressure_delay_s: float = 0.50
+    bwr_rps_low_level_percent: float = 82.0
+    bwr_rps_low_level_delay_s: float = 0.50
+    bwr_rps_high_clad_C: float = 650.0
+    bwr_rps_thermal_delay_s: float = 0.50
+    bwr_axial_node_count: int = 4
+    bwr_axial_power_shape_tau_s: float = 0.8
+    bwr_axial_void_transport_tau_s: float = 1.8
+    bwr_axial_void_shape_feedback: float = 1.4
+    bwr_rcic_start_level_percent: float = 90.0
+    bwr_hpci_start_level_percent: float = 90.0
+    bwr_low_pressure_eccs_start_level_percent: float = 85.0
+    bwr_ads_start_level_percent: float = 70.0
+    bwr_ads_pressure_permissive_mpa: float = 1.50
+    bwr_low_pressure_eccs_pressure_permissive_mpa: float = 2.20
+    bwr_rcic_start_delay_s: float = 2.0
+    bwr_hpci_start_delay_s: float = 1.0
+    bwr_ads_start_delay_s: float = 5.0
+    bwr_lpci_start_delay_s: float = 1.0
+    bwr_core_spray_start_delay_s: float = 1.0
+    bwr_eccs_reset_level_percent: float = 95.0
+    bwr_eccs_reset_delay_s: float = 10.0
 
 
 @dataclass
@@ -366,7 +493,7 @@ class State:
         self.Ucool = self.c.Ccool * self.c.Mref * (
             self.Tc - self.c.coolant_energy_reference_C
         )
-        self.Tprz = 344.7915516
+        self.Tprz = self.c.pressure_reference_temperature_C
         self.P = self.c.Pref
         self.M = self.c.Mref
 
@@ -380,7 +507,7 @@ class State:
         self.Tcl = c.TrefClad
         self.Tc = c.TrefCool
         self.Ucool = c.Ccool * c.Mref * (self.Tc - c.coolant_energy_reference_C)
-        self.Tprz = 344.7915516
+        self.Tprz = c.pressure_reference_temperature_C
         self.void_fraction = 0.0
         self.boiling_regime = "single-phase"
         self.chf_ratio = 0.0
@@ -402,6 +529,97 @@ class State:
         self.hist.clear()
 
 
+@dataclass
+class BWRState(State):
+    """BWR-only vessel, safety-system, level, and conservation state."""
+
+    bwr_core_mass_kg: float = 0.0
+    bwr_core_energy_MJ: float = 0.0
+    bwr_downcomer_mass_kg: float = 0.0
+    bwr_downcomer_energy_MJ: float = 0.0
+    bwr_upper_plenum_mass_kg: float = 0.0
+    bwr_upper_plenum_energy_MJ: float = 0.0
+    bwr_separator_mass_kg: float = 0.0
+    bwr_separator_energy_MJ: float = 0.0
+    bwr_steam_mass_kg: float = 0.0
+    bwr_steam_energy_MJ: float = 0.0
+    bwr_core_vapor_mass_kg: float = 0.0
+    bwr_core_vapor_energy_MJ: float = 0.0
+    bwr_core_flow_fraction: float = 1.0
+    bwr_pump_head_m: float = 0.0
+    bwr_buoyancy_head_m: float = 0.0
+    bwr_friction_head_m: float = 0.0
+    bwr_core_friction_head_m: float = 0.0
+    bwr_single_phase_loss_head_m: float = 0.0
+    bwr_acceleration_head_m: float = 0.0
+    bwr_two_phase_friction_multiplier: float = 1.0
+    bwr_steam_flow_kg_s: float = 0.0
+    bwr_feedwater_flow_kg_s: float = 0.0
+    bwr_srv_flow_kg_s: float = 0.0
+    bwr_downcomer_temperature_C: float = 0.0
+    bwr_liquid_energy_residual_MW: float = 0.0
+    bwr_collapsed_level_percent: float = 100.0
+    bwr_indicated_level_percent: float = 100.0
+    bwr_indicated_level_m: float = 0.0
+    bwr_reference_leg_temperature_C: float = 0.0
+    bwr_collapsed_level_m: float = 0.0
+    bwr_steam_dome_volume_m3: float = 0.0
+    bwr_steam_volume_residual_m3: float = 0.0
+    bwr_steam_energy_residual_MJ: float = 0.0
+    bwr_rcic_flow_kg_s: float = 0.0
+    bwr_hpci_flow_kg_s: float = 0.0
+    bwr_lpci_flow_kg_s: float = 0.0
+    bwr_core_spray_flow_kg_s: float = 0.0
+    bwr_break_flow_kg_s: float = 0.0
+    bwr_break_critical_pressure_mpa: float = 0.0
+    bwr_break_mass_flux_kg_m2_s: float = 0.0
+    bwr_break_choked: bool = False
+    bwr_rcic_head_margin_mpa: float = 0.0
+    bwr_hpci_head_margin_mpa: float = 0.0
+    bwr_lpci_head_margin_mpa: float = 0.0
+    bwr_core_spray_head_margin_mpa: float = 0.0
+    bwr_coolant_heat_transfer_factor: float = 1.0
+    bwr_heat_transfer_regime: str = "single-phase convection"
+    bwr_critical_power_coupled: bool = False
+    bwr_bypass_flow_kg_s: float = 0.0
+    bwr_shutdown_cooling_MW: float = 0.0
+    bwr_suppression_pool_temperature_C: float = 35.0
+    bwr_suppression_pool_mass_kg: float = 0.0
+    bwr_suppression_pool_energy_MJ: float = 0.0
+    bwr_mass_balance_residual_kg_s: float = 0.0
+    bwr_energy_balance_residual_MW: float = 0.0
+    bwr_vessel_pool_mass_residual_kg_s: float = 0.0
+    bwr_vessel_pool_energy_residual_MW: float = 0.0
+    bwr_rcic_latched: bool = False
+    bwr_hpci_latched: bool = False
+    bwr_ads_latched: bool = False
+    bwr_lpci_latched: bool = False
+    bwr_core_spray_latched: bool = False
+    bwr_rcic_demand_timer_s: float = 0.0
+    bwr_hpci_demand_timer_s: float = 0.0
+    bwr_ads_demand_timer_s: float = 0.0
+    bwr_lpci_demand_timer_s: float = 0.0
+    bwr_core_spray_demand_timer_s: float = 0.0
+    bwr_safety_reset_timer_s: float = 0.0
+    bwr_trip_demand_timer_s: float = 0.0
+    bwr_rps_high_flux_timer_s: float = 0.0
+    bwr_rps_high_pressure_timer_s: float = 0.0
+    bwr_rps_low_level_timer_s: float = 0.0
+    bwr_rps_thermal_timer_s: float = 0.0
+    bwr_protection_demand: bool = False
+    bwr_trip_cause: str = "None"
+    bwr_axial_power_fraction: np.ndarray = field(
+        default_factory=lambda: np.full(4, 0.25, dtype=float)
+    )
+    bwr_axial_vapor_fraction: np.ndarray = field(
+        default_factory=lambda: np.full(4, 0.25, dtype=float)
+    )
+    bwr_axial_void_fraction: np.ndarray = field(
+        default_factory=lambda: np.zeros(4, dtype=float)
+    )
+    bwr_axial_peak_node: int = 1
+
+
 @dataclass(frozen=True)
 class TimelineEvent:
     time_s: float
@@ -420,8 +638,10 @@ class LWRTeachingSimulator:
         self.c = Constants()
         self.state = State(self.c)
         self.steam_tables = SteamTables()
-        self.physics = ThermalHydraulicsEngine(self.c, self.steam_tables)
+        self.physics = create_plant_model(self.c.plant_type, self.c, self.steam_tables)
+        self.physics.initialize_state(self.state)
         self.hot_channel = HotChannelModel(self.steam_tables)
+        self.bwr_hot_channel = BWRHotChannelModel(self.steam_tables)
         self.hot_channel_window: Optional[tk.Toplevel] = None
         self.hot_channel_result: Optional[HotChannelResult] = None
         self.hot_channel_result_time = float("nan")
@@ -455,6 +675,9 @@ class LWRTeachingSimulator:
 
         self.auto_eccs_var = tk.BooleanVar(value=True)
         self.auto_trip_var = tk.BooleanVar(value=True)
+        self.bwr_system_availability = {
+            name: True for name in ("rcic", "hpci", "ads", "lpci", "core_spray")
+        }
         self.hot_channel_coupling_var = tk.BooleanVar(value=True)
 
         self.demo_mode = False
@@ -869,6 +1092,10 @@ class LWRTeachingSimulator:
     def update_auto_eccs_demand(self) -> float:
         """Update the latched automatic-ECCS demand with recovery hysteresis."""
         s = self.state
+        if self.c.plant_type == "BWR":
+            enabled = bool(self.auto_eccs_var.get())
+            s.auto_eccs_demand = 1.0 if enabled and s.M < 0.90 else 0.0
+            return s.auto_eccs_demand
         if not bool(self.auto_eccs_var.get()):
             s.auto_eccs_demand = 0.0
             return 0.0
@@ -914,6 +1141,17 @@ class LWRTeachingSimulator:
     def calculate_hot_channel(self) -> HotChannelResult:
         s, c = self.state, self.c
         heat_fraction = c.prompt_frac * s.n + float(np.sum(c.decay_lambda * s.Di))
+        if c.plant_type == "BWR":
+            saturation_temperature = self.steam_tables.saturation_temperature(
+                self.clamp(s.P, 0.10, 17.50)
+            )
+            inlet_temperature = self.clamp(
+                s.bwr_downcomer_temperature_C, 25.0, saturation_temperature-0.1
+            )
+            return self.bwr_hot_channel.solve(
+                heat_fraction, self.clamp(s.P, 0.10, 17.50), inlet_temperature,
+                s.bwr_core_flow_fraction, s.bwr_axial_power_fraction,
+            )
         pump = max(0.0, self.control_vars["pump"].get() / 100.0)
         natural = 0.035 + 0.08 * self.clamp(s.M, 0.0, 1.0)
         break_bypass = 1.0 - 0.35 * self.clamp(
@@ -1421,8 +1659,22 @@ class LWRTeachingSimulator:
 
     def eccs_is_active(self) -> bool:
         s = self.state
+        if self.c.plant_type == "BWR":
+            commanded = any(
+                self.control_vars[key].get() > 1.0
+                for key in ("rcic", "hpci", "ads", "lpci", "core_spray")
+            )
+            flowing = (
+                s.bwr_rcic_flow_kg_s+s.bwr_hpci_flow_kg_s
+                +s.bwr_lpci_flow_kg_s+s.bwr_core_spray_flow_kg_s
+            ) > 1.0
+            return commanded or flowing or (
+                bool(self.auto_eccs_var.get()) and s.M < 0.90
+            )
         manual = self.control_vars["eccs"].get() > 1.0
-        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        hot_coupling = (
+            self.c.plant_type != "BWR" and bool(self.hot_channel_coupling_var.get())
+        )
         axial_dnbr_limit = (
             hot_coupling and np.isfinite(s.hot_min_dnbr) and s.hot_min_dnbr <= 1.0
         )
@@ -1445,7 +1697,9 @@ class LWRTeachingSimulator:
 
     def current_event_state(self) -> Dict[str, object]:
         s = self.state
-        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        hot_coupling = (
+            self.c.plant_type != "BWR" and bool(self.hot_channel_coupling_var.get())
+        )
         axial_high_clad = (
             hot_coupling
             and np.isfinite(s.hot_peak_clad_C)
@@ -1993,24 +2247,35 @@ class LWRTeachingSimulator:
         """Advance the GUI-independent physics engine by one RK4 step."""
         s = self.state
         self.update_auto_eccs_demand()
-        cache_age = s.t - self.hot_channel_result_time
-        if (
-            not np.isfinite(cache_age)
-            or cache_age >= getattr(self, "hot_channel_update_interval_s", 0.25) - 1.0e-12
-        ):
-            try:
-                hot_result = self.calculate_hot_channel()
-                self.hot_channel_error = None
-            except (ValueError, ArithmeticError) as error:
-                hot_result = None
-                self.hot_channel_error = str(error)
-            self.hot_channel_result = hot_result
-            self.hot_channel_result_time = s.t
+        model_metadata = getattr(self.physics, "metadata", None)
+        hot_channel_capable = (
+            True if model_metadata is None else model_metadata.hot_channel_capable
+        )
+        if not hot_channel_capable:
+            hot_result = None
+            self.hot_channel_result = None
+            self.hot_channel_error = "BWR axial-channel diagnostic is unavailable"
         else:
-            hot_result = self.hot_channel_result
+            cache_age = s.t - self.hot_channel_result_time
+            if (
+                not np.isfinite(cache_age)
+                or cache_age >= getattr(self, "hot_channel_update_interval_s", 0.25) - 1.0e-12
+            ):
+                try:
+                    hot_result = self.calculate_hot_channel()
+                    self.hot_channel_error = None
+                except (ValueError, ArithmeticError) as error:
+                    hot_result = None
+                    self.hot_channel_error = str(error)
+                self.hot_channel_result = hot_result
+                self.hot_channel_result_time = s.t
+            else:
+                hot_result = self.hot_channel_result
         self.update_hot_channel_state(hot_result)
 
-        hot_coupling = bool(self.hot_channel_coupling_var.get())
+        hot_coupling = (
+            self.c.plant_type != "BWR" and bool(self.hot_channel_coupling_var.get())
+        )
         thermal_limit_temperature = max(
             s.Tcl,
             s.hot_peak_clad_C if np.isfinite(s.hot_peak_clad_C) else s.Tcl,
@@ -2020,12 +2285,18 @@ class LWRTeachingSimulator:
             and np.isfinite(s.hot_min_dnbr)
             and s.hot_min_dnbr <= 1.0
         )
-        if bool(self.auto_trip_var.get()) and (
-            s.n > 1.18 or s.P > self.c.pressHigh or s.M < 0.82
-            or (hot_coupling and thermal_limit_temperature > self.c.cladWarn)
-            or dnbr_trip
-        ):
-            s.trip = True
+        if self.c.plant_type == "BWR":
+            automatic_trip_demand, _ = self.physics.evaluate_protection(s,dt)
+            if bool(self.auto_trip_var.get()) and automatic_trip_demand:
+                s.trip = True
+        else:
+            automatic_trip_demand = (
+                s.n > 1.18 or s.P > self.c.pressHigh or s.M < 0.82
+                or (hot_coupling and thermal_limit_temperature > self.c.cladWarn)
+                or dnbr_trip
+            )
+            if bool(self.auto_trip_var.get()) and automatic_trip_demand:
+                s.trip = True
 
         rod_pct = self.control_vars["rod"].get()
         trim_pcm = self.control_vars["trim"].get()
@@ -2033,27 +2304,54 @@ class LWRTeachingSimulator:
             rod_pct = 100.0
             trim_pcm = min(trim_pcm, 0.0)
 
-        controls = ControlInputs(
-            rod_pct=rod_pct,
-            trim_pcm=trim_pcm,
-            boron_ppm=self.control_vars["boron"].get(),
-            pump_pct=self.control_vars["pump"].get(),
-            sg_pct=self.control_vars["sg"].get(),
-            break_pct=self.control_vars["break"].get(),
-            eccs_pct=self.control_vars["eccs"].get(),
-            afw_pct=self.control_vars["afw"].get(),
-            porv_pct=self.control_vars["porv"].get(),
-            spray_pct=self.control_vars["spray"].get(),
-            heater_pct=self.control_vars["heater"].get(),
-            rhr_pct=self.control_vars["rhr"].get(),
-            auto_eccs=bool(self.auto_eccs_var.get()),
-            auto_eccs_demand=s.auto_eccs_demand,
-            hot_channel_coupling=hot_coupling,
-            hot_channel_peak_clad_C=s.hot_peak_clad_C,
-            hot_channel_min_dnbr=s.hot_min_dnbr,
-        )
+        if self.c.plant_type == "BWR":
+            controls = BWRControlInputs(
+                rod_pct=rod_pct, trim_pcm=trim_pcm,
+                recirc_pct=self.control_vars["recirc"].get(),
+                feedwater_pct=self.control_vars["feedwater"].get(),
+                main_steam_pct=self.control_vars["main_steam"].get(),
+                srv_pct=self.control_vars["srv"].get(),
+                msiv_pct=self.control_vars["msiv"].get(),
+                bypass_pct=self.control_vars["bypass"].get(),
+                rcic_pct=self.control_vars["rcic"].get(),
+                hpci_pct=self.control_vars["hpci"].get(),
+                ads_pct=self.control_vars["ads"].get(),
+                lpci_pct=self.control_vars["lpci"].get(),
+                core_spray_pct=self.control_vars["core_spray"].get(),
+                shutdown_cooling_pct=self.control_vars["shutdown_cooling"].get(),
+                bwr_break_pct=self.control_vars["bwr_break"].get(),
+                auto_bwr_safety=bool(self.auto_eccs_var.get()),
+                rcic_available=self.bwr_system_availability["rcic"],
+                hpci_available=self.bwr_system_availability["hpci"],
+                ads_available=self.bwr_system_availability["ads"],
+                lpci_available=self.bwr_system_availability["lpci"],
+                core_spray_available=self.bwr_system_availability["core_spray"],
+                critical_power_ratio=s.hot_min_dnbr,
+                critical_power_valid_nodes=s.hot_dnbr_valid_nodes,
+            )
+        else:
+            controls = ControlInputs(
+                rod_pct=rod_pct, trim_pcm=trim_pcm,
+                boron_ppm=self.control_vars["boron"].get(),
+                pump_pct=self.control_vars["pump"].get(),
+                sg_pct=self.control_vars["sg"].get(),
+                break_pct=self.control_vars["break"].get(),
+                eccs_pct=self.control_vars["eccs"].get(),
+                afw_pct=self.control_vars["afw"].get(),
+                porv_pct=self.control_vars["porv"].get(),
+                spray_pct=self.control_vars["spray"].get(),
+                heater_pct=self.control_vars["heater"].get(),
+                rhr_pct=self.control_vars["rhr"].get(),
+                auto_eccs=bool(self.auto_eccs_var.get()),
+                auto_eccs_demand=s.auto_eccs_demand,
+                hot_channel_coupling=hot_coupling,
+                hot_channel_peak_clad_C=s.hot_peak_clad_C,
+                hot_channel_min_dnbr=s.hot_min_dnbr,
+            )
         diagnostics = self.physics.step(s, controls, dt)
-        s.autoECCS = controls.auto_eccs
+        s.autoECCS = (
+            controls.auto_bwr_safety if self.c.plant_type == "BWR" else controls.auto_eccs
+        )
         s.effective_eccs_fraction = diagnostics.eccs_fraction
         s.break_out_fraction_s = diagnostics.break_out
         s.porv_out_fraction_s = diagnostics.porv_out

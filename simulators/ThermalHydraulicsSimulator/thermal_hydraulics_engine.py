@@ -280,7 +280,9 @@ class ThermalHydraulicsEngine:
         )
         derivatives[self.I_VOID] = (equilibrium_void - void) / 2.5
 
-        target_prz = 344.7915516 + 0.55 * (coolant_temperature - c.TrefCool) + 45.0 * (mass - 1.0)
+        target_prz = c.pressure_reference_temperature_C + 0.55 * (
+            coolant_temperature - c.TrefCool
+        ) + 45.0 * (mass - 1.0)
         derivatives[self.I_TPRZ] = (
             (target_prz - float(y[self.I_TPRZ])) / c.pressurizer_tau
             - 18.0 * break_fraction * pressure_head

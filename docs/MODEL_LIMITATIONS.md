@@ -36,6 +36,12 @@ analysis.
 
 Scenario results should therefore be interpreted as qualitative trends. A
 plausible-looking numerical value is not evidence of physical accuracy.
+R7 adds active, broad regression envelopes for six generic BWR scenarios and
+numerical recovery-demo end states. These test direction, ordering, rough
+magnitude, protection state, and internal conservation consistency after the
+R1-R6 remediations. They are teaching-model regression gates, not comparison
+against plant measurements, uncertainty-qualified validation, licensing
+criteria, or evidence that untested transients are reliable.
 
 The optional Representative LWR kinetics preset declares 100% normalized
 power as 3000 MWth, uses a realistic-scale prompt generation time with
@@ -53,6 +59,91 @@ continuous classroom-scale response between 14 MPa, 8 MPa, and 2 MPa. These
 reference pressures illustrate increasing injection effectiveness during
 depressurization; they are not plant-specific equipment setpoints or validated
 pump-performance curves.
+
+The selectable 37-state BWR R9 source-parameterized feature prototype separately integrates reduced-order core
+liquid, core vapor, downcomer liquid, upper-plenum liquid, separator liquid, and
+steam-dome mass and stored energy. At every RHS evaluation a saturated flash
+solves pressure and phase split from total vessel mass, internal energy, and
+fixed volume. It includes
+direct steam/feedwater boundary flows, a residence-time separator surrogate, an
+integrated pump/head-flow and density-driven recirculation momentum balance, a core-vapor-volume void estimate, teaching-scale void
+reactivity, and simplified SRV capacity. These control volumes and coefficients
+are representative rather than plant-specific. The displayed liquid inventory
+is a geometry-derived collapsed level, not a calibrated narrow- or wide-range
+instrument indication. The indicated level adds geometry-derived core swell and
+a first-order reference-leg temperature correction, but is not calibrated to
+plant sensing lines. Separator carryover/carry-under efficiency, detailed pump
+and plant-specific component curves, dynamic containment pressure and detailed suppression-pool hydraulics,
+and validated fuel-vendor safety-limit MCPR methods are not modeled. The
+BWR safety-support extension includes delayed, latched teaching-scale RCIC, HPCI, ADS, LPCI,
+core-spray, MSIV, bypass, break-flow, shutdown-cooling, swell-indication, and
+suppression-pool mass/energy and suction-limit surrogates. Equipment availability
+can be selected independently. Generic quadratic pump curves now enforce
+vessel-to-pool differential-pressure shutoff, with separate steam-driver
+permissives for RCIC/HPCI. Break discharge uses a backpressure-aware isentropic
+homogeneous-equilibrium flashing-nozzle model. The HEM assumption omits phase
+slip and thermal nonequilibrium and may bias critical flux; break geometry,
+discharge coefficient, runout capacities, and shutoff heads are not calibrated.
+These remain screening models, not plant-specific setpoints, logic diagrams,
+level instruments, containment response, or validated ECCS performance. The PWR
+hot-channel model is not reused in BWR mode. A separate quasi-steady 24-node
+BWR channel reports axial equilibrium quality, homogeneous void, temperatures,
+and diagnostic CPR from the guarded open X-L method documented in
+`docs/BWR_CRITICAL_POWER_METHOD.md`. It does not represent a bundle-specific
+GEXL correlation, detailed spacer or part-length-rod effects, bypass flow,
+channel-box heat transfer, uncertainty, or a safety limit. A valid in-range CPR
+now drives a bounded nucleate/transition/film-boiling conductance in the lumped
+cladding energy balance. The conductance curve is a teaching surrogate, not a
+validated post-dryout or reflood correlation; invalid CPR remains uncoupled and
+is reported as an unassessed two-phase condition. Capability
+maturity and the ordered follow-on work are maintained in
+`docs/BWR_DEVELOPMENT_ROADMAP.md`.
+
+The recirculation loop separates core two-phase friction, other
+single-phase/local loss, acceleration head, hydrostatic driving head, and pump
+head. Its Lottes-Flinn multiplier and homogeneous mixture acceleration term are
+open reduced-order methods, but component reference losses, effective elevation,
+flow area, and pump curve are generic calibrations. The model does not resolve
+individual jet pumps, recirculation loops, separator pressure drop, flow-regime
+slip, cavitation, or density-wave instability.
+
+The BWR protection model independently times high flux, high vessel pressure,
+low indicated level, and guarded thermal-limit channels and retains the first
+trip cause. ECCS/ADS initiation, delays, pressure permissives, availability, and
+reset hysteresis are explicit. It does not model redundant sensor divisions,
+one-out-of-two-twice voting, bypasses, surveillance tolerances, instrument drift,
+high-drywell-pressure initiation, electrical divisions, or plant-specific
+technical-specification setpoints.
+
+R6 adds four dynamic axial power-shape and four vapor-holdup shares. They capture
+upward void propagation, bottom-entry rod shaping, spatial void feedback, and a
+moving axial heat-flux peak at low computational cost. They are normalized
+redistributions of lumped totals, not independent nodal mass/energy balances.
+There is no radial coupling, neutron diffusion, xenon dynamics, channel-to-channel
+flow redistribution, crossflow, or validated stability decay-ratio prediction.
+Four nodes are a fixed teaching resolution and do not establish spatial grid
+convergence.
+
+BWR scenario calibration uses broad normalized envelopes derived from public
+OECD/NEA and NRC descriptions. It verifies response direction, ordering, and
+representative magnitude, not pointwise agreement with a particular plant.
+The provenance and acceptance ranges are documented in
+`docs/BWR_SCENARIO_CALIBRATION.md` and encoded in `bwr_calibration.py`. R7
+revalidated all declared transient envelopes after the R1-R6 physics changes.
+
+R8 local sensitivity scores use deterministic plus/minus 20% one-at-a-time
+screening perturbations. They are not probability distributions, confidence
+intervals, component tolerances, global sensitivities, or uncertainty bounds.
+They may miss parameter interactions, nonlinear thresholds, and sensitivities
+outside the selected transient/time window. Their sole purpose is numerical
+robustness checking and prioritizing parameter evidence for R9.
+
+R9 adopts selected public BWR/4 rated quantities and high-pressure makeup
+operating points. The real external recirculation-pump head is not applied to
+the reduced effective loop because the actual pumps drive jet pumps. Pump-curve
+shape, reference-leg dynamics, void reactivity, SRV aggregation, and break
+coefficient remain generic where no transferable public basis was established.
+Mixed source-backed and generic parameters do not constitute a plant model.
 
 The thermal-hydraulics model conserves a lumped primary coolant inventory and
 stored energy: break, PORV, vapor, and ECCS flows transport simplified
