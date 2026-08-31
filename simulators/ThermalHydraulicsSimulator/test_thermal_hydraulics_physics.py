@@ -14,7 +14,8 @@ from thermal_hydraulics_simulator import (
     State,
 )
 from steam_properties import SteamTables
-from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
+from thermal_hydraulics_engine import ControlInputs
+from plant_models import create_plant_model
 from hot_channel import HotChannelModel
 
 
@@ -35,7 +36,7 @@ def make_model(**overrides: float) -> LWRTeachingSimulator:
     model.c = Constants()
     model.state = State(model.c)
     model.steam_tables = SteamTables()
-    model.physics = ThermalHydraulicsEngine(model.c, model.steam_tables)
+    model.physics = create_plant_model("PWR", model.c, model.steam_tables)
     model.hot_channel = HotChannelModel(model.steam_tables)
     model.hot_channel_result = None
     model.hot_channel_result_time = float("nan")
@@ -207,9 +208,17 @@ class ThermalHydraulicsPhysicsTests(unittest.TestCase):
         self.assertEqual(len(rows[0]), len(rows[1]))
         self.assertIn("hot_min_dnbr", rows[0])
         self.assertIn("effective_eccs_percent", rows[0])
+        self.assertIn("pwr_mass_balance_residual_fraction_s", rows[0])
+        self.assertIn("pwr_energy_balance_residual_MW", rows[0])
+        self.assertIn("pwr_projection_energy_correction_MW", rows[0])
+        self.assertIn("pwr_trip_cause", rows[0])
+        self.assertIn("pwr_rps_low_flow_timer_s", rows[0])
         summary = model.scenario_summary_text()
         self.assertIn("Axial-to-lumped coupling: enabled", summary)
         self.assertIn("Minimum in-range W-3 DNBR", summary)
+        self.assertIn("Maximum PWR mass-balance residual", summary)
+        self.assertIn("Maximum PWR energy-balance residual", summary)
+        self.assertIn("PWR retained trip cause", summary)
 
     def test_failed_hot_channel_solves_are_rate_limited(self) -> None:
         model = make_model()

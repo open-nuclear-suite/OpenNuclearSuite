@@ -1,5 +1,8 @@
 # Thermal-Hydraulics and LOCA Teaching Simulator
 
+The concise publication-style assessment of the major model claims is
+[Major-item verification and validation](../../docs/THERMAL_HYDRAULICS_VV_MAJOR_ITEMS.md).
+
 An interactive lumped-parameter teaching application for exploring coupled
 reactor power, decay heat, primary coolant inventory and energy, pressurizer
 pressure, boiling regimes, CHF, heat removal, ECCS, and selected LWR accident
@@ -156,6 +159,26 @@ RK4 step; trips, controls, event logging, and history updates occur only after
 the completed step. State projection preserves the declared classroom bounds
 for power, temperatures, inventory, void fraction, and pressurizer state.
 
+Each PWR right-hand-side evaluation publishes matched primary-inventory storage
+and boundary rates plus matched fuel--clad--coolant stored-energy and external
+power rates. Their residuals, along with any separate correction introduced by
+the bounded state projection, are available in state, scenario summaries, and
+CSV logs. The energy ledger includes reactor heat generation, steam-generator
+and RHR removal, injection enthalpy, and break/PORV/evaporation discharge
+enthalpy. It excludes the teaching pressurizer-temperature control state,
+which has no declared physical heat capacity or inventory.
+
+The PWR primary side is also resolved into core, hot-leg, cold-leg, and
+pressurizer liquid/steam inventories. Their component masses and energies are
+normalized after every step to the conserved aggregate primary stores. A
+first-order loop momentum balance compares RCP head and buoyancy head with
+quadratic loop loss, so pump coastdown and natural-circulation contribution are
+dynamic rather than instantaneous control multipliers. The steam-generator
+secondary has an explicit water/steam mass store, energy store, pressure,
+feedwater flow, and steam flow with independently reported balance residuals.
+These states are visible in the maintained PyQtGraph readout and summary and
+are included in history exports.
+
 Runtime water properties come from `data/if97_ph_table.npz`, covering
 0.1--20 MPa and 100--3600 kJ/kg. The table was generated with CoolProp's
 `IF97::Water` backend from the IAPWS-IF97 industrial formulation. The simulator
@@ -259,19 +282,77 @@ pressure and level mismatch. In BWR mode, an unchecked availability box blocks
 both automatic and manual flow from that system; its command slider is disabled
 to show that the command cannot take effect.
 
+PWR reactor protection uses independent teaching-scale high-flux,
+high-primary-pressure, low-inventory, low-flow, and coupled thermal-limit
+channels. Setpoints and delays are declared in `PWRConstants`; each signal has
+its own timer, a cleared signal resets before actuation, and the first completed
+trip cause is retained. The low-flow channel has a power permissive so shutdown
+natural circulation does not create a new trip demand. These are generic
+classroom settings, not plant protection setpoints or voting logic.
+
 In the hot-channel plot, **Thermal limit** is the calculated local CHF or
 critical-power threshold, not a temperature. Dividing that threshold by actual
 surface heat flux gives DNBR for the PWR channel and the teaching model's
 diagnostic CPR margin for the BWR channel. A margin of 1.0 is the modeled limit.
 
-Automatic ECCS demand is latched while a LOCA remains active. It can increase
-from 35% to 85% or 100% as conditions deteriorate, but it does not repeatedly
-switch off when inventory crosses a single threshold. Automatic clearing
-requires the break to be isolated and generous recovery margins in pressure,
-inventory, cladding temperature, and DNBR. Turning off **Auto ECCS logic** still
-clears the automatic demand immediately.
+PWR safety injection separates finite passive accumulator discharge, HPSI,
+LPSI/reflood, and sump-recirculation paths. The pumped paths use generic
+quadratic runout-to-shutoff curves; individual automatic demands have declared
+delays, latches, pressure permissives, availability controls, and recovery reset
+logic. Recirculation additionally requires an active break and low inventory.
+In **Simplified** control mode, the single **Combined ECCS command
+(simplified)** is routed through these component curves and the individual
+commands are unavailable. In **Advanced** mode, the combined command is
+unavailable and separate HPSI, LPSI/reflood, and sump-recirculation controls
+and availability switches are exposed. Changing modes clears commands that
+become inactive. Turning off **Auto ECCS logic** inhibits automatic
+pumped flow without blocking available manual commands or passive accumulator
+discharge.
+
+For a normal-operation rod maneuver, the lumped PWR model applies a 30-second
+effective rod-motion lag and a bounded teaching-model power-damping term. This
+keeps the characteristic xenon/temperature response visible without the large,
+slow oscillations produced by an instantaneous lumped reactivity step. Reactor
+trips and accident scenarios bypass this maneuver damping.
+
+The PWR model carries four normalized axial power shares and four normalized
+vapor-holdup shares. Top-entry rod insertion shifts the power distribution
+downward, local void feeds back on the shape, and upward transport moves vapor
+holdup toward the outlet. The reconstructed four-zone void distribution has no
+independent mass inventory, and axial power shares only redistribute the
+existing total reactor heat. The current shape drives the 20-node PWR hot-
+channel heat-flux profile and is published in the PyQtGraph readout, summary,
+and CSV history exports. This is a reduced spatial teaching surrogate rather
+than nodal neutronics or subchannel thermal hydraulics.
 
 ## Verification
+
+P1-4 makes every declared PWR transient an executable regression gate. Normal
+operation, SBLOCA, LBLOCA, loss of flow, loss of heat sink, and station blackout
+are checked at published times against broad normalized response envelopes.
+The gates cover power, pressure, inventory, loop flow, void, cladding
+temperature, protection state, and applicable injection flows. Every accident
+also closes the aggregate primary, resolved-component, and steam-generator
+secondary conservation ledgers. The four scripted recoveries must finish in a
+declared stable-shutdown class without saturating the primary-inventory upper
+projection. See
+[PWR_SCENARIO_CALIBRATION.md](../../docs/PWR_SCENARIO_CALIBRATION.md).
+
+P2-1 adds a deterministic transient-analysis harness and ±20% one-at-a-time
+screening of influential generic PWR parameters. It compares the normal 0.05 s
+timestep with 0.025 s for every accident family and accumulates equation
+residuals, state-projection corrections, and secondary balance residuals over
+complete runs. The resulting ranking is a data-replacement priority, not a
+probability distribution or plant uncertainty statement. See
+[PWR_UNCERTAINTY_SENSITIVITY.md](../../docs/PWR_UNCERTAINTY_SENSITIVITY.md).
+
+P2-2 replaces a coherent rated-reference family with public NRC AP1000 data:
+thermal power, primary pressure and average/hot/cold temperatures, nominal RCP
+and loop head, and steam-generator pressure/inventory. Machine-readable
+provenance records the source quantity, conversion, applicability, and every
+high-priority parameter intentionally left generic. LOFT timing is retained as
+sequence evidence rather than transplanted as commercial-plant actuation data.
+See [PWR_PARAMETER_DATA_BASIS.md](../../docs/PWR_PARAMETER_DATA_BASIS.md).
 
 Run the focused physics regression checks from the repository root:
 

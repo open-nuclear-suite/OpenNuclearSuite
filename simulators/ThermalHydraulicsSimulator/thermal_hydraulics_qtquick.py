@@ -70,19 +70,43 @@ ApplicationWindow {
                 SplitView.preferredWidth: 375; SplitView.minimumWidth: 300
                 ColumnLayout { width: 350; spacing: 9
                     Label { text: "PRIMARY AND SAFETY CONTROLS"; color: root.accent; font.bold: true }
+                    Label { text: "PWR ECCS CONTROL DETAIL"; color: root.accent; font.bold: true }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: ["Simplified", "Advanced"]
+                        currentIndex: controller.pwrControlMode === "simplified" ? 0 : 1
+                        onActivated: controller.setPwrControlMode(currentText.toLowerCase())
+                    }
+                    Label {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#aebdca"
+                        text: controller.pwrControlMode === "simplified"
+                            ? "One combined teaching command; individual injection commands are hidden."
+                            : "Independent HPSI, LPSI/reflood, and sump-recirculation commands; the combined command is disabled."
+                    }
                     Repeater { model: [
                         ["rod","Rod insertion %",0,100], ["boron","Soluble boron ppm",0,2500],
                         ["pump","Primary pump %",0,120], ["sg","SG heat removal %",0,140],
-                        ["break","LOCA break size %",0,100], ["eccs","Manual ECCS %",0,100],
+                        ["break","LOCA break size %",0,100], ["eccs","Combined ECCS command (simplified) %",0,100],
+                        ["pwr_hpsi","Manual HPSI %",0,100], ["pwr_lpsi","Manual LPSI %",0,100],
+                        ["pwr_recirculation","Manual recirculation %",0,100],
                         ["afw","Aux feedwater %",0,100], ["rhr","RHR cooldown %",0,100]
                     ]
-                        ColumnLayout { Layout.fillWidth: true
+                        ColumnLayout {
+                            visible: controller.controlVisible(modelData[0])
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: visible ? implicitHeight : 0
                             Label { text: modelData[1] + "  " + control.value.toFixed(1) }
                             Slider { id: control; Layout.fillWidth: true; from: modelData[2]; to: modelData[3]; value: controller.controlValue(modelData[0]); onMoved: controller.setControl(modelData[0], value) }
                         }
                     }
                     Label { text: "LIVE READOUT"; color: root.accent; font.bold: true }
-                    Label { text: controller.readout; font.family: "Consolas"; lineHeight: 1.2 }
+                    Label {
+                        id: liveReadout; text: controller.readout; font.family: "Consolas"; lineHeight: 1.2
+                        HoverHandler { id: readoutHover }
+                        ToolTip.visible: readoutHover.hovered && controller.normalRodManeuverActive
+                        ToolTip.text: "After rod insertion, lumped thermal and reactivity feedback can let power recover toward this equilibrium target; this does not represent rod withdrawal."
+                        ToolTip.delay: 500
+                    }
                 }
             }
             ColumnLayout {
@@ -151,6 +175,16 @@ class Controller(QObject):
     def setControl(self, name, value): self.backend.set_control(name, value)
     @Slot(str, result=float)
     def controlValue(self, name): return float(self.backend.sim.control_vars[name].get())
+    @Slot(str, result=bool)
+    def controlVisible(self, name):
+        individual = name in ("pwr_hpsi", "pwr_lpsi", "pwr_recirculation")
+        if name == "eccs":
+            return self.backend.pwr_control_mode == "simplified"
+        return self.backend.pwr_control_mode == "advanced" if individual else True
+    @Slot(str)
+    def setPwrControlMode(self, mode):
+        self.backend.set_pwr_control_mode(mode)
+        self.updated.emit()
 
     def tick(self):
         now = time.perf_counter()
@@ -187,6 +221,8 @@ class Controller(QObject):
         return f"{state}  |  {self.backend.state.scenario_name}  |  t = {self.backend.state.t:.2f} s"
     @Property(bool, notify=updated)
     def tripped(self): return bool(self.backend.state.trip)
+    @Property(str, notify=updated)
+    def pwrControlMode(self): return self.backend.pwr_control_mode
     @Property(str, constant=True)
     def bannerUrl(self): return ""
     @Property(float, notify=updated)
@@ -200,7 +236,26 @@ class Controller(QObject):
     @Property(str, notify=updated)
     def readout(self):
         s = self.backend.state
-        return f"Fuel / clad / coolant  {s.Tf:.0f} / {s.Tcl:.0f} / {s.Tc:.1f} °C\nVoid fraction             {100*s.void_fraction:.1f}%\nCHF ratio                 {s.chf_ratio:.2f}\nAxial MDNBR               {s.hot_min_dnbr:.2f}"
+        protection = ""
+        if self.backend.plant_type == "PWR":
+            protection = (
+                f"\nProtection demand         {'YES' if s.pwr_protection_demand else 'NO'}"
+                f"\nRetained trip cause       {s.pwr_trip_cause}"
+            )
+            if self.normalRodManeuverActive:
+                protection += (
+                    f"\nNormal maneuver target   {100*s.pwr_normal_power_target:.1f}%  ⓘ"
+                )
+        return f"Fuel / clad / coolant  {s.Tf:.0f} / {s.Tcl:.0f} / {s.Tc:.1f} °C\nVoid fraction             {100*s.void_fraction:.1f}%\nCHF ratio                 {s.chf_ratio:.2f}\nAxial MDNBR               {s.hot_min_dnbr:.2f}{protection}"
+    @Property(bool, notify=updated)
+    def normalRodManeuverActive(self):
+        s = self.backend.state
+        return bool(
+            self.backend.plant_type == "PWR" and not s.trip
+            and s.scenario_name == "Normal operation"
+            and self.backend.sim.control_vars["break"].get() <= 0.0
+            and s.pwr_effective_rod_pct > 1.0e-6
+        )
     @Property(str, notify=updated)
     def hotSummary(self):
         s = self.backend.state

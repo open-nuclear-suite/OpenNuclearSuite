@@ -34,6 +34,59 @@ class ThermalHydraulicsGUIBackendTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.backend.set_bwr_system_available("unknown", False)
 
+    def test_pwr_safety_system_availability_blocks_manual_flow(self):
+        self.backend.set_pwr_control_mode("advanced")
+        self.assertFalse(self.backend.set_pwr_system_available("hpsi", False))
+        self.backend.state.Tprz = self.backend.sim.steam_tables.saturation_temperature(2.0)
+        self.backend.state.P = 2.0
+        self.backend.set_control("pwr_hpsi", 100)
+        self.backend.start(); self.backend.advance_elapsed(0.1)
+        self.assertEqual(self.backend.state.pwr_hpsi_flow_fraction_s, 0.0)
+        with self.assertRaises(ValueError):
+            self.backend.set_pwr_system_available("unknown", False)
+
+    def test_pwr_eccs_control_modes_are_mutually_exclusive(self):
+        self.assertEqual(self.backend.pwr_control_mode, "simplified")
+        self.backend.set_control("pwr_lpsi", 75)
+        self.backend.state.Tprz = self.backend.sim.steam_tables.saturation_temperature(2.0)
+        self.backend.state.P = 2.0
+        self.backend.sim.step_model(self.backend.DT)
+        self.assertEqual(self.backend.state.pwr_lpsi_flow_fraction_s, 0.0)
+
+        self.assertEqual(self.backend.set_pwr_control_mode("advanced"), "advanced")
+        self.assertEqual(self.backend.sim.control_vars["pwr_lpsi"].get(), 0.0)
+        self.backend.set_control("eccs", 100)
+        self.backend.set_control("pwr_lpsi", 75)
+        self.backend.sim.step_model(self.backend.DT)
+        self.assertGreater(self.backend.state.pwr_lpsi_flow_fraction_s, 0.0)
+        self.assertEqual(self.backend.sim.control_vars["eccs"].get(), 0.0)
+
+        self.backend.set_pwr_control_mode("simplified")
+        self.assertEqual(self.backend.sim.control_vars["pwr_lpsi"].get(), 0.0)
+        with self.assertRaises(ValueError):
+            self.backend.set_pwr_control_mode("expert")
+
+    def test_normal_pwr_rod_maneuver_is_damped_without_affecting_trip_response(self):
+        self.backend.set_automatic("trip", False)
+        self.backend.sim.c.noise_pcm = 0.0
+        self.backend.set_control("rod", 15.0)
+        powers = []
+        for step in range(12000):
+            self.backend.sim.step_model(self.backend.DT)
+            if step % 20 == 19:
+                powers.append(self.backend.state.n)
+        minimum_index = min(range(len(powers)), key=powers.__getitem__)
+        self.assertGreater(min(powers), 0.50)
+        self.assertLess(min(powers), 0.60)
+        self.assertLess(max(powers[minimum_index:]), 0.85)
+        self.assertAlmostEqual(powers[-1], 0.78, delta=0.03)
+        self.assertAlmostEqual(self.backend.state.pwr_effective_rod_pct, 15.0, delta=0.01)
+
+        self.backend.scram()
+        self.backend.sim.step_model(self.backend.DT)
+        self.assertEqual(self.backend.state.pwr_effective_rod_pct, 100.0)
+        self.assertEqual(self.backend.state.pwr_normal_power_damping_pcm, 0.0)
+
     def test_scram_and_scenario_controls(self):
         self.backend.scram()
         self.assertTrue(self.backend.state.trip)

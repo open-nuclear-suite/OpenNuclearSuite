@@ -20,7 +20,9 @@ class Value:
 
 CONTROL_DEFAULTS = {
     "rod": 0.0, "trim": 0.0, "boron": 1000.0, "pump": 100.0,
-    "sg": 100.0, "break": 0.0, "eccs": 0.0, "afw": 0.0,
+    "sg": 100.0, "break": 0.0, "eccs": 0.0,
+    "pwr_hpsi": 0.0, "pwr_lpsi": 0.0, "pwr_recirculation": 0.0,
+    "afw": 0.0,
     "porv": 0.0, "spray": 0.0, "heater": 0.0, "rhr": 0.0,
     "noise": 2.0, "speed": 1.0,
     "recirc": 100.0, "feedwater": 100.0, "main_steam": 100.0,
@@ -32,7 +34,8 @@ CONTROL_DEFAULTS = {
 CONTROL_LIMITS = {
     "rod": (0, 100), "trim": (-500, 500), "boron": (0, 2500),
     "pump": (0, 120), "sg": (0, 140), "break": (0, 100),
-    "eccs": (0, 100), "afw": (0, 100), "porv": (0, 100),
+    "eccs": (0, 100), "pwr_hpsi": (0, 100), "pwr_lpsi": (0, 100),
+    "pwr_recirculation": (0, 100), "afw": (0, 100), "porv": (0, 100),
     "spray": (0, 100), "heater": (0, 100), "rhr": (0, 100),
     "noise": (0, 10), "speed": (0.2, 20),
     "recirc": (0, 120), "feedwater": (0, 140),
@@ -119,8 +122,8 @@ def build_headless_model(model_dir: Path = DEFAULT_MODEL_DIR, plant_type: str = 
     import thermal_hydraulics_simulator as th
     sim = th.LWRTeachingSimulator.__new__(th.LWRTeachingSimulator)
     plant_key = str(plant_type).upper()
-    constant_types = {"PWR": th.Constants, "BWR": th.BWRConstants}
-    state_types = {"PWR": th.State, "BWR": th.BWRState}
+    constant_types = {"PWR": th.PWRConstants, "BWR": th.BWRConstants}
+    state_types = {"PWR": th.PWRState, "BWR": th.BWRState}
     if plant_key not in constant_types:
         raise ValueError(f"Unknown plant type: {plant_type}")
     sim.c, sim.state = constant_types[plant_key](), None
@@ -141,6 +144,10 @@ def build_headless_model(model_dir: Path = DEFAULT_MODEL_DIR, plant_type: str = 
     sim.bwr_system_availability = {
         name: True for name in ("rcic", "hpci", "ads", "lpci", "core_spray")
     }
+    sim.pwr_system_availability = {
+        name: True for name in ("hpsi", "lpsi", "accumulator", "recirculation")
+    }
+    sim.pwr_control_mode = "simplified"
     sim.state.autoECCS = True
     if plant_key == "BWR":
         sim.state.scenario_name = "BWR normal operation"
@@ -161,7 +168,9 @@ class ThermalHydraulicsGUIBackend:
     CONTROL_LABELS = {
         "rod": "Control rods", "trim": "Fine reactivity", "boron": "Boron",
         "pump": "Primary pumps", "sg": "Steam-generator heat removal",
-        "break": "Break size", "eccs": "ECCS", "afw": "Auxiliary feedwater",
+        "break": "Break size", "eccs": "Combined ECCS command (simplified)",
+        "pwr_hpsi": "HPSI", "pwr_lpsi": "LPSI / reflood",
+        "pwr_recirculation": "Sump recirculation", "afw": "Auxiliary feedwater",
         "porv": "PORV", "spray": "Pressurizer spray", "heater": "Pressurizer heaters",
         "rhr": "Residual heat removal", "recirc": "Recirculation",
         "feedwater": "Feedwater", "main_steam": "Main steam valve", "srv": "Manual SRV",
@@ -174,7 +183,9 @@ class ThermalHydraulicsGUIBackend:
     def __init__(self, model_dir: Path = DEFAULT_MODEL_DIR):
         self.model_dir = Path(model_dir).resolve()
         self.plant_type = "PWR"
+        self.pwr_control_mode = "simplified"
         self.sim = build_headless_model(self.model_dir, self.plant_type)
+        self.sim.pwr_control_mode = self.pwr_control_mode
         self.running, self.physics_credit = False, 0.0
         self.demo_mode, self.demo_script = False, DEMO_SCRIPTS[0]
         self.demo_start_t = 0.0
@@ -197,6 +208,7 @@ class ThermalHydraulicsGUIBackend:
     def reset(self):
         self.running = False
         self.sim = build_headless_model(self.model_dir, self.plant_type)
+        self.sim.pwr_control_mode = self.pwr_control_mode
         self.physics_credit = 0.0
         self.demo_mode, self.demo_start_t = False, 0.0
         self.demo_action_log, self._last_demo_stage = [], None
@@ -216,6 +228,8 @@ class ThermalHydraulicsGUIBackend:
 
     def scram(self):
         self.state.trip = True
+        if self.plant_type == "PWR" and self.state.pwr_trip_cause == "None":
+            self.state.pwr_trip_cause = "Manual reactor trip"
         self.set_control("rod", 100.0)
         self.set_control("trim", 0.0)
         self.running = True
@@ -224,6 +238,13 @@ class ThermalHydraulicsGUIBackend:
         if key not in CONTROL_LIMITS: raise ValueError(f"Unknown control: {key}")
         low, high = CONTROL_LIMITS[key]
         value = min(max(float(value), low), high)
+        if self.plant_type == "PWR":
+            if self.pwr_control_mode == "simplified" and key in (
+                "pwr_hpsi", "pwr_lpsi", "pwr_recirculation",
+            ):
+                value = 0.0
+            elif self.pwr_control_mode == "advanced" and key == "eccs":
+                value = 0.0
         self.sim.control_vars[key].set(value)
         return value
 
@@ -241,6 +262,25 @@ class ThermalHydraulicsGUIBackend:
         self.sim.bwr_system_availability[name] = bool(available)
         return bool(available)
 
+    def set_pwr_system_available(self, name, available):
+        if name not in self.sim.pwr_system_availability:
+            raise ValueError(f"Unknown PWR safety system: {name}")
+        self.sim.pwr_system_availability[name] = bool(available)
+        return bool(available)
+
+    def set_pwr_control_mode(self, mode):
+        mode = str(mode).strip().lower()
+        if mode not in ("simplified", "advanced"):
+            raise ValueError(f"Unknown PWR control mode: {mode}")
+        self.pwr_control_mode = mode
+        self.sim.pwr_control_mode = mode
+        if mode == "simplified":
+            for key in ("pwr_hpsi", "pwr_lpsi", "pwr_recirculation"):
+                self.sim.control_vars[key].set(0.0)
+        else:
+            self.sim.control_vars["eccs"].set(0.0)
+        return mode
+
     def select_scenario(self, name):
         if self.plant_type == "BWR":
             if name not in BWR_SCENARIOS: raise ValueError(f"Unknown BWR scenario: {name}")
@@ -250,6 +290,8 @@ class ThermalHydraulicsGUIBackend:
             if name not in SCENARIOS: raise ValueError(f"Unknown scenario: {name}")
             title, trip, auto_eccs, values = SCENARIOS[name]
         self.state.scenario_name, self.state.trip = title, trip
+        if self.plant_type == "PWR" and trip:
+            self.state.pwr_trip_cause = f"{title} scenario trip"
         self.state.auto_eccs_demand = 0.0
         self.set_automatic("eccs", auto_eccs)
         self.state.autoECCS = auto_eccs
@@ -263,6 +305,8 @@ class ThermalHydraulicsGUIBackend:
 
     def start_demo(self, script):
         if script not in self.available_demos: raise ValueError(f"Unknown demo: {script}")
+        if self.plant_type == "PWR":
+            self.set_pwr_control_mode("simplified")
         self.reset(); self.select_scenario("NORMAL")
         self.demo_mode, self.demo_script = True, script
         self.demo_start_t, self.sim.demo_stage = self.state.t, "Demo armed: initial full-power operation"
@@ -312,16 +356,16 @@ class ThermalHydraulicsGUIBackend:
             if rel < 20: stage, values = "Normal full-power operation before the fault.", dict(rod=0,trim=0,boron=1000,pump=100,sg=100,**{"break":0})
             elif rel < 35: stage, values = "Fault inserted: small-break LOCA. Primary inventory and pressure begin to fall.", dict(pump=75,sg=100,eccs=0,afw=0,porv=0,spray=0,rhr=0,**{"break":12})
             elif rel < 65: stage, values = "Protection response: reactor trip, rods inserted, decay heat remains.", dict(rod=100,trim=0,pump=60,sg=100,eccs=0,afw=20,porv=0,spray=0,rhr=0,**{"break":12}); s.trip=True
-            elif rel < 120: stage, values = "Safety response: ECCS and auxiliary feedwater recover inventory and heat removal.", dict(rod=100,pump=60,sg=100,eccs=65,afw=55,porv=0,spray=0,rhr=0,**{"break":12}); s.trip=True
-            elif rel < 170: stage, values = "Cooldown response: controlled depressurization prepares for residual heat removal.", dict(eccs=55,afw=75,porv=18,spray=35,rhr=0,**{"break":8})
-            elif rel < 240: stage, values = "Long-term response: break isolated in the model; RHR removes decay heat at low pressure.", dict(eccs=35,afw=55,porv=8,spray=20,rhr=80,**{"break":0})
+            elif rel < 120: stage, values = "Safety response: ECCS and auxiliary feedwater recover inventory and heat removal.", dict(rod=100,pump=60,sg=100,eccs=65 if s.M < 0.98 else 0,afw=55,porv=0,spray=0,rhr=0,**{"break":12}); s.trip=True
+            elif rel < 170: stage, values = "Cooldown response: controlled depressurization prepares for residual heat removal.", dict(eccs=55 if s.M < 0.98 else 0,afw=75,porv=18,spray=35,rhr=0,**{"break":8})
+            elif rel < 240: stage, values = "Long-term response: break isolated in the model; RHR removes decay heat at low pressure.", dict(eccs=25 if s.M < 0.95 else 0,afw=55,porv=8,spray=20,rhr=80,**{"break":0})
             else: self.sim.demo_stage="Demo complete: plant stabilized in shutdown cooling. Manual control returned."; self.stop_demo(completed=True); return
         elif script == "LBLOCA ECCS response":
             if rel < 15: stage, values = "Normal full-power operation before the large-break LOCA.", dict(rod=0,trim=0,pump=100,sg=100,eccs=0,afw=0,porv=0,spray=0,rhr=0,**{"break":0})
             elif rel < 30: stage, values = "Fault inserted: large break causes rapid depressurization and inventory loss.", dict(rod=100,pump=0,sg=60,eccs=0,afw=0,porv=0,spray=0,rhr=0,**{"break":70}); s.trip=True
-            elif rel < 90: stage, values = "Emergency response: accumulators/LPSI surrogate inject strongly after pressure falls.", dict(rod=100,pump=0,sg=60,eccs=100,afw=40,porv=0,spray=0,rhr=0,**{"break":70}); s.trip=True
-            elif rel < 150: stage, values = "Recovery response: break area is reduced and ECCS refloods the core.", dict(eccs=100,afw=60,rhr=40,**{"break":35})
-            elif rel < 230: stage, values = "Long-term cooling: break isolated, ECCS reduced, RHR maintains decay-heat removal.", dict(eccs=45,afw=50,rhr=90,spray=20,porv=5,**{"break":0})
+            elif rel < 90: stage, values = "Emergency response: accumulators/LPSI surrogate inject strongly after pressure falls.", dict(rod=100,pump=0,sg=60,eccs=100 if s.M < 0.98 else 0,afw=40,porv=0,spray=0,rhr=0,**{"break":70}); s.trip=True
+            elif rel < 150: stage, values = "Recovery response: break area is reduced and ECCS refloods the core.", dict(eccs=80 if s.M < 0.98 else 0,afw=60,rhr=40,**{"break":35})
+            elif rel < 230: stage, values = "Long-term cooling: break isolated, ECCS reduced, RHR maintains decay-heat removal.", dict(eccs=25 if s.M < 0.95 else 0,afw=50,rhr=90,spray=20,porv=5,**{"break":0})
             else: self.sim.demo_stage="Demo complete: long-term cooling established. Manual control returned."; self.stop_demo(completed=True); return
         elif script == "Loss of heat sink recovery":
             if rel < 20: stage, values = "Normal operation with steam generator heat removal available.", dict(rod=0,trim=0,pump=100,sg=100,eccs=0,afw=0,porv=0,spray=0,rhr=0,**{"break":0})

@@ -1,7 +1,7 @@
 """Plant-model boundary for the thermal-hydraulics teaching simulator.
 
-The PWR compatibility wrapper and independent BWR vessel engine implement the
-same small integration contract without sharing plant-specific equations.
+Dedicated PWR and BWR engines implement the same small integration contract
+without sharing plant-specific equations or public state/control contracts.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from steam_properties import SteamTables
-from thermal_hydraulics_engine import ThermalHydraulicsEngine
+from pwr_plant_model import PWRPlantModel as IndependentPWRPlantModel
 from bwr_plant_model import BWRPlantModel as IndependentBWRPlantModel
 
 
@@ -56,8 +56,8 @@ class PlantModel(ABC):
         """Return the model-specific pressure-dependent injection fraction."""
 
 
-class PWRPlantModel(ThermalHydraulicsEngine, PlantModel):
-    """Compatibility wrapper around the original PWR-like plant equations."""
+class PWRPlantModel(IndependentPWRPlantModel, PlantModel):
+    """Dedicated reduced-order PWR plant model."""
 
     metadata = PlantModelMetadata(
         key="PWR", label="Representative PWR", development_status="implemented",
@@ -66,6 +66,12 @@ class PWRPlantModel(ThermalHydraulicsEngine, PlantModel):
             "lumped_transient": CapabilityStatus.IMPLEMENTED,
             "hot_channel": CapabilityStatus.IMPLEMENTED,
             "accident_scenarios": CapabilityStatus.IMPLEMENTED,
+            "safety_logic": CapabilityStatus.IMPLEMENTED,
+            "safety_system_hydraulics": CapabilityStatus.TEACHING_SURROGATE,
+            "reduced_axial_dynamics": CapabilityStatus.TEACHING_SURROGATE,
+            "scenario_envelopes": CapabilityStatus.TEACHING_SURROGATE,
+            "uncertainty_sensitivity_screening": CapabilityStatus.TEACHING_SURROGATE,
+            "public_parameter_provenance": CapabilityStatus.IMPLEMENTED,
         },
     )
 

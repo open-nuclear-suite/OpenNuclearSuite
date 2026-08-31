@@ -54,11 +54,25 @@ coefficients, component curves, protection delays, and setpoints remain
 illustrative unless separately documented and calibrated. Dimensional units
 and algebraic energy conservation do not establish plant validation.
 
-The thermal-hydraulics model represents ECCS injection effectiveness with a
-continuous classroom-scale response between 14 MPa, 8 MPa, and 2 MPa. These
-reference pressures illustrate increasing injection effectiveness during
-depressurization; they are not plant-specific equipment setpoints or validated
-pump-performance curves.
+The PWR thermal-hydraulics model separates accumulator, HPSI, LPSI/reflood, and
+sump-recirculation injection paths. Generic quadratic HPSI/LPSI/recirculation
+pump curves enforce declared shutoff pressures; the passive accumulator has a
+finite normalized inventory and pressure-driven discharge. Automatic pump
+demands have separate delays, latches, pressure permissives, availability, and
+recovery reset logic. Simplified mode provides a mutually exclusive **Combined
+ECCS command (simplified)** routed through the same component curves; Advanced
+mode instead exposes the individual pumped paths and their availability.
+Capacities,
+setpoints, delays, accumulator volume, containment collection, sump inventory,
+boration, train redundancy, electrical divisions, and switchover logic are not
+calibrated to a plant. Reflood is not spatially resolved, and recirculation is a
+net injection surrogate rather than a closed containment mass balance.
+
+During normal-operation PWR rod maneuvers, a 30-second effective rod-motion lag
+and bounded proportional power-damping term reduce the exaggerated slow
+oscillation of the lumped point-kinetics/thermal-feedback model. This is a
+teaching-model stabilizer, not a modeled rod-drive control system or calibrated
+plant controller. Trips, non-normal scenarios, and break transients bypass it.
 
 The selectable 37-state BWR R9 source-parameterized feature prototype separately integrates reduced-order core
 liquid, core vapor, downcomer liquid, upper-plenum liquid, separator liquid, and
@@ -157,6 +171,38 @@ critical-flow, CHF/DNB, reflood, or component models. The single primary volume
 cannot reproduce loop seals, counter-current flow, spatial core uncovery,
 break-location effects, or multidimensional behavior.
 
+The PWR component resolution remains reduced order. Core, hot-leg, cold-leg,
+and pressurizer liquid/steam stores are constrained partitions of the existing
+aggregate primary mass and energy, not independent compressible control-volume
+solutions. The loop momentum equation uses one effective flow path, quadratic
+loss, a speed-squared pump head, and a temperature-difference buoyancy term; it
+does not resolve individual loops, pump homologous curves, reverse flow, loop
+seals, or two-phase momentum. The steam-generator secondary is one equilibrium
+mass/energy store with a fixed nominal vapor fraction and an effective pressure
+capacitance. It does not resolve tube rows, shrink/swell, separator carryover,
+steam-line dynamics, or detailed feedwater and turbine systems.
+
+The P1-4 PWR scenario envelopes are regression and phenomenology checks, not
+validation bands, uncertainty intervals, licensing acceptance criteria, or
+predictions for a specific plant. In particular, the unrecovered loss-of-heat-
+sink and station-blackout presets reach the model's 17.5 MPa pressure projection
+by 30 seconds. The tests deliberately expose and retain that boundary contact;
+they do not establish a realistic peak pressure. Recovery scripts use simple
+inventory-dependent injection termination and generic operator-action timing.
+
+P2-1 parameter perturbations are deterministic local screens. The ±20% band is
+not a measured tolerance, confidence interval, failure probability, or joint
+uncertainty distribution. One-at-a-time derivatives omit parameter interaction,
+threshold discontinuities, nonlinear tails, and model-form uncertainty. A low
+score can also mean that the selected transient does not excite the parameter.
+
+P2-2 uses selected AP1000 rated data as a coherent public reference family, but
+the simulator is not an AP1000 model. The one reported SG secondary inventory
+is an effective reduced-model scale; the full plant has two SGs. A rated RCP
+head closes the nominal effective loop, but component pressure losses and the
+off-design/homologous pump curve remain generic. Active HPSI/LPSI are retained
+as teaching surrogates even though the AP1000 safety architecture is passive.
+
 Water and steam property queries use a bundled pressure-enthalpy table generated
 from IAPWS-IF97 over 0.1--20 MPa and 100--3600 kJ/kg. Bilinear interpolation is
 used in single-phase regions and saturation-endpoint mixture relations are used
@@ -166,8 +212,13 @@ not validate the simulator's lumped component, break-flow, boiling, CHF, ECCS,
 or pressurizer models.
 
 The optional representative hot-channel diagnostic is a one-dimensional,
-single-channel reduced-order calculation with a prescribed chopped-sine axial power
-shape and declared PWR-like geometry. It marches pressure and bulk enthalpy and
+single-channel reduced-order calculation with a four-zone dynamic axial power
+shape mapped onto its declared PWR-like geometry. The normalized shape responds
+to top-entry rod insertion and reconstructed local void, but it only redistributes
+existing total power. Four normalized vapor-holdup shares reconstruct local void
+from the aggregate void state; they do not add coolant mass or energy. The model
+does not solve axial neutron diffusion, xenon dynamics, crossflow, or independent
+zone conservation equations. The hot channel marches pressure and bulk enthalpy and
 uses fixed effective fuel, gap, cladding, and coolant heat-transfer parameters.
 Its axial temperature profile is recalculated quasi-steadily and does not carry
 separate fuel/cladding thermal-capacitance states at every axial node. The trend

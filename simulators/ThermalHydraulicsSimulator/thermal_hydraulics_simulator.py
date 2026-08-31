@@ -43,7 +43,7 @@ from typing import Callable, Deque, Dict, List, Optional, TextIO, Tuple
 import numpy as np
 
 from steam_properties import SteamTables
-from thermal_hydraulics_engine import ControlInputs, ThermalHydraulicsEngine
+from thermal_hydraulics_engine import PWRControlInputs, ThermalHydraulicsEngine
 from hot_channel import HotChannelModel, HotChannelResult
 from bwr_hot_channel import BWRHotChannelModel
 from bwr_plant_model import BWRControlInputs
@@ -216,13 +216,14 @@ def show_startup_splash(
 
 
 @dataclass
-class Constants:
+class PWRConstants:
+    """Declared constants for the representative reduced-order PWR."""
     # Nominal LWR / PWR-like teaching reference values.
-    Pnom_MW: float = 3000.0
-    Tsink: float = 295.0
+    Pnom_MW: float = 3415.0
+    Tsink: float = 273.0
     TrefFuel: float = 850.0
     TrefClad: float = 335.0
-    TrefCool: float = 305.0
+    TrefCool: float = 300.75
     Pref: float = 15.5
     Mref: float = 1.0
     plant_type: str = "PWR"
@@ -270,12 +271,65 @@ class Constants:
     break_coeff: float = 0.014
     porv_coeff: float = 0.007
     eccs_coeff: float = 0.010
+    # Generic safety-injection curves. Flow units are nominal-primary-inventory
+    # fractions per second; values are teaching surrogates, not plant data.
+    pwr_hpsi_runout_fraction_s: float = 0.0040
+    pwr_hpsi_shutoff_pressure_mpa: float = 16.0
+    pwr_lpsi_runout_fraction_s: float = 0.0070
+    pwr_lpsi_shutoff_pressure_mpa: float = 3.0
+    pwr_accumulator_set_pressure_mpa: float = 4.5
+    pwr_accumulator_flow_coefficient_fraction_s_mpa_sqrt: float = 0.0025
+    pwr_accumulator_inventory_fraction_of_primary: float = 0.04
+    pwr_recirculation_runout_fraction_s: float = 0.0040
+    pwr_recirculation_shutoff_pressure_mpa: float = 2.0
+    pwr_hpsi_start_delay_s: float = 1.0
+    pwr_lpsi_start_delay_s: float = 1.0
+    pwr_recirculation_start_delay_s: float = 8.0
+    pwr_safety_reset_inventory_fraction: float = 0.98
+    pwr_safety_reset_delay_s: float = 10.0
+    # Reduced-order primary-loop and steam-generator component model.
+    pwr_core_inventory_share: float = 0.30
+    pwr_hot_leg_inventory_share: float = 0.20
+    pwr_cold_leg_inventory_share: float = 0.42
+    pwr_pressurizer_inventory_share: float = 0.08
+    pwr_component_inventory_tau_s: float = 4.0
+    pwr_loop_flow_tau_s: float = 4.0
+    pwr_rcp_shutoff_head_m: float = 111.25
+    pwr_loop_loss_head_m: float = 111.25
+    pwr_nominal_core_delta_C: float = 41.0
+    pwr_natural_circulation_head_per_C_m: float = 0.20
+    pwr_secondary_inventory_kg: float = 76965.77
+    pwr_secondary_reference_pressure_mpa: float = 5.76
+    pwr_secondary_vapor_mass_fraction: float = 0.05
+    pwr_secondary_pressure_energy_capacity_MJ_MPa: float = 3500.0
+    pwr_afw_capacity_kg_s: float = 900.0
+    pwr_axial_node_count: int = 4
+    pwr_axial_power_shape_tau_s: float = 1.0
+    pwr_axial_void_transport_tau_s: float = 2.0
+    pwr_axial_void_shape_feedback: float = 0.9
+    pwr_axial_void_reactivity_pcm_per_fraction: float = -1500.0
+    pwr_normal_rod_maneuver_tau_s: float = 30.0
+    pwr_normal_power_target_slope: float = 1.45
+    pwr_normal_power_damping_gain_pcm: float = 500.0
 
     # Classroom warning limits only.
     cladWarn: float = 650.0
     cladTrip: float = 1200.0
     pressHigh: float = 16.7
     invLow: float = 0.65
+    # Generic teaching protection settings, not plant setpoints.
+    pwr_rps_high_flux_fraction: float = 1.18
+    pwr_rps_high_flux_delay_s: float = 0.10
+    pwr_rps_high_pressure_mpa: float = 16.70
+    pwr_rps_high_pressure_delay_s: float = 0.50
+    pwr_rps_low_inventory_fraction: float = 0.82
+    pwr_rps_low_inventory_delay_s: float = 0.50
+    pwr_rps_low_flow_fraction: float = 0.75
+    pwr_rps_low_flow_power_permissive: float = 0.25
+    pwr_rps_low_flow_delay_s: float = 1.00
+    pwr_rps_high_clad_C: float = 650.0
+    pwr_rps_low_dnbr: float = 1.0
+    pwr_rps_thermal_delay_s: float = 0.50
 
     @property
     def beta(self) -> float:
@@ -300,7 +354,7 @@ class Constants:
 
 
 @dataclass
-class BWRConstants(Constants):
+class BWRConstants(PWRConstants):
     """Declared phase-1 reference values for a representative BWR equilibrium."""
 
     plant_type: str = "BWR"
@@ -439,6 +493,26 @@ class History:
     hot_clad: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     hot_outlet: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
     hot_dnbr: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_mass_residual: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_energy_residual: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_projection_mass: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_projection_energy: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_primary_flow: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_core_temp: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_hot_leg_temp: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_cold_leg_temp: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_prz_liquid_inventory: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_prz_steam_inventory: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_secondary_mass: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_secondary_pressure: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_power_1: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_power_2: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_power_3: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_power_4: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_void_1: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_void_2: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_void_3: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
+    pwr_axial_void_4: Deque[float] = field(default_factory=lambda: deque(maxlen=1600))
 
     def as_array(self, name: str) -> np.ndarray:
         return np.array(getattr(self, name), dtype=float)
@@ -447,14 +521,24 @@ class History:
         for name in (
             "t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "rho",
             "flow", "void", "chf", "hot_fuel", "hot_clad", "hot_outlet",
-            "hot_dnbr",
+            "hot_dnbr", "pwr_mass_residual", "pwr_energy_residual",
+            "pwr_projection_mass", "pwr_projection_energy",
+            "pwr_primary_flow", "pwr_core_temp", "pwr_hot_leg_temp",
+            "pwr_cold_leg_temp", "pwr_prz_liquid_inventory",
+            "pwr_prz_steam_inventory", "pwr_secondary_mass",
+            "pwr_secondary_pressure",
+            "pwr_axial_power_1", "pwr_axial_power_2", "pwr_axial_power_3",
+            "pwr_axial_power_4", "pwr_axial_void_1", "pwr_axial_void_2",
+            "pwr_axial_void_3", "pwr_axial_void_4",
         ):
             getattr(self, name).clear()
 
 
 @dataclass
-class State:
-    c: Constants
+class PWRState:
+    """Public dynamic and diagnostic state for the PWR model."""
+
+    c: PWRConstants
     t: float = 0.0
     n: float = 1.0
     Ci: np.ndarray = field(init=False)
@@ -477,6 +561,78 @@ class State:
     break_out_fraction_s: float = 0.0
     porv_out_fraction_s: float = 0.0
     evaporation_out_fraction_s: float = 0.0
+    pwr_stored_mass_rate_fraction_s: float = 0.0
+    pwr_boundary_mass_rate_fraction_s: float = 0.0
+    pwr_mass_balance_residual_fraction_s: float = 0.0
+    pwr_stored_energy_rate_MW: float = 0.0
+    pwr_boundary_energy_rate_MW: float = 0.0
+    pwr_energy_balance_residual_MW: float = 0.0
+    pwr_projection_mass_correction_fraction_s: float = 0.0
+    pwr_projection_energy_correction_MW: float = 0.0
+    pwr_rps_high_flux_timer_s: float = 0.0
+    pwr_rps_high_pressure_timer_s: float = 0.0
+    pwr_rps_low_inventory_timer_s: float = 0.0
+    pwr_rps_low_flow_timer_s: float = 0.0
+    pwr_rps_thermal_timer_s: float = 0.0
+    pwr_protection_demand: bool = False
+    pwr_active_protection_channels: str = "None"
+    pwr_trip_cause: str = "None"
+    pwr_hpsi_flow_fraction_s: float = 0.0
+    pwr_lpsi_flow_fraction_s: float = 0.0
+    pwr_accumulator_flow_fraction_s: float = 0.0
+    pwr_recirculation_flow_fraction_s: float = 0.0
+    pwr_total_injection_fraction_s: float = 0.0
+    pwr_hpsi_head_margin_mpa: float = 0.0
+    pwr_lpsi_head_margin_mpa: float = 0.0
+    pwr_accumulator_inventory_fraction: float = 1.0
+    pwr_hpsi_latched: bool = False
+    pwr_lpsi_latched: bool = False
+    pwr_recirculation_latched: bool = False
+    pwr_hpsi_demand_timer_s: float = 0.0
+    pwr_lpsi_demand_timer_s: float = 0.0
+    pwr_recirculation_demand_timer_s: float = 0.0
+    pwr_safety_reset_timer_s: float = 0.0
+    pwr_core_inventory_fraction: float = 0.30
+    pwr_hot_leg_inventory_fraction: float = 0.20
+    pwr_cold_leg_inventory_fraction: float = 0.42
+    pwr_pressurizer_liquid_inventory_fraction: float = 0.07
+    pwr_pressurizer_steam_inventory_fraction: float = 0.01
+    pwr_core_temperature_C: float = 309.0
+    pwr_hot_leg_temperature_C: float = 311.0
+    pwr_cold_leg_temperature_C: float = 299.0
+    pwr_primary_flow_fraction: float = 1.0
+    pwr_pump_head_m: float = 95.0
+    pwr_buoyancy_head_m: float = 0.0
+    pwr_loop_loss_head_m: float = 95.0
+    pwr_surge_flow_fraction_s: float = 0.0
+    pwr_core_energy_MJ: float = 0.0
+    pwr_hot_leg_energy_MJ: float = 0.0
+    pwr_cold_leg_energy_MJ: float = 0.0
+    pwr_pressurizer_liquid_energy_MJ: float = 0.0
+    pwr_pressurizer_steam_energy_MJ: float = 0.0
+    pwr_components_initialized: bool = False
+    pwr_secondary_mass_kg: float = 0.0
+    pwr_secondary_energy_MJ: float = 0.0
+    pwr_secondary_pressure_mpa: float = 6.5
+    pwr_secondary_steam_flow_kg_s: float = 0.0
+    pwr_secondary_feedwater_flow_kg_s: float = 0.0
+    pwr_secondary_heat_transfer_MW: float = 0.0
+    pwr_secondary_mass_residual_kg_s: float = 0.0
+    pwr_secondary_energy_residual_MW: float = 0.0
+    pwr_axial_power_fraction: np.ndarray = field(
+        default_factory=lambda: np.full(4, 0.25, dtype=float)
+    )
+    pwr_axial_vapor_fraction: np.ndarray = field(
+        default_factory=lambda: np.full(4, 0.25, dtype=float)
+    )
+    pwr_axial_void_fraction: np.ndarray = field(
+        default_factory=lambda: np.zeros(4, dtype=float)
+    )
+    pwr_axial_peak_node: int = 1
+    pwr_axial_spatial_void_signal: float = 0.0
+    pwr_effective_rod_pct: float = 0.0
+    pwr_normal_power_target: float = 1.0
+    pwr_normal_power_damping_pcm: float = 0.0
     P: float = field(init=False)
     M: float = field(init=False)
     trip: bool = False
@@ -521,6 +677,75 @@ class State:
         self.break_out_fraction_s = 0.0
         self.porv_out_fraction_s = 0.0
         self.evaporation_out_fraction_s = 0.0
+        self.pwr_stored_mass_rate_fraction_s = 0.0
+        self.pwr_boundary_mass_rate_fraction_s = 0.0
+        self.pwr_mass_balance_residual_fraction_s = 0.0
+        self.pwr_stored_energy_rate_MW = 0.0
+        self.pwr_boundary_energy_rate_MW = 0.0
+        self.pwr_energy_balance_residual_MW = 0.0
+        self.pwr_projection_mass_correction_fraction_s = 0.0
+        self.pwr_projection_energy_correction_MW = 0.0
+        self.pwr_rps_high_flux_timer_s = 0.0
+        self.pwr_rps_high_pressure_timer_s = 0.0
+        self.pwr_rps_low_inventory_timer_s = 0.0
+        self.pwr_rps_low_flow_timer_s = 0.0
+        self.pwr_rps_thermal_timer_s = 0.0
+        self.pwr_protection_demand = False
+        self.pwr_active_protection_channels = "None"
+        self.pwr_trip_cause = "None"
+        self.pwr_hpsi_flow_fraction_s = 0.0
+        self.pwr_lpsi_flow_fraction_s = 0.0
+        self.pwr_accumulator_flow_fraction_s = 0.0
+        self.pwr_recirculation_flow_fraction_s = 0.0
+        self.pwr_total_injection_fraction_s = 0.0
+        self.pwr_hpsi_head_margin_mpa = 0.0
+        self.pwr_lpsi_head_margin_mpa = 0.0
+        self.pwr_accumulator_inventory_fraction = 1.0
+        self.pwr_hpsi_latched = False
+        self.pwr_lpsi_latched = False
+        self.pwr_recirculation_latched = False
+        self.pwr_hpsi_demand_timer_s = 0.0
+        self.pwr_lpsi_demand_timer_s = 0.0
+        self.pwr_recirculation_demand_timer_s = 0.0
+        self.pwr_safety_reset_timer_s = 0.0
+        self.pwr_core_inventory_fraction = c.pwr_core_inventory_share
+        self.pwr_hot_leg_inventory_fraction = c.pwr_hot_leg_inventory_share
+        self.pwr_cold_leg_inventory_fraction = c.pwr_cold_leg_inventory_share
+        self.pwr_pressurizer_liquid_inventory_fraction = 0.875 * c.pwr_pressurizer_inventory_share
+        self.pwr_pressurizer_steam_inventory_fraction = 0.125 * c.pwr_pressurizer_inventory_share
+        self.pwr_core_temperature_C = c.TrefCool
+        self.pwr_hot_leg_temperature_C = c.TrefCool + 0.5 * c.pwr_nominal_core_delta_C
+        self.pwr_cold_leg_temperature_C = c.TrefCool - 0.5 * c.pwr_nominal_core_delta_C
+        self.pwr_primary_flow_fraction = 1.0
+        self.pwr_pump_head_m = c.pwr_rcp_shutoff_head_m
+        self.pwr_buoyancy_head_m = 0.0
+        self.pwr_loop_loss_head_m = c.pwr_loop_loss_head_m
+        self.pwr_surge_flow_fraction_s = 0.0
+        self.pwr_core_energy_MJ = 0.0
+        self.pwr_hot_leg_energy_MJ = 0.0
+        self.pwr_cold_leg_energy_MJ = 0.0
+        self.pwr_pressurizer_liquid_energy_MJ = 0.0
+        self.pwr_pressurizer_steam_energy_MJ = 0.0
+        self.pwr_components_initialized = False
+        self.pwr_secondary_mass_kg = c.pwr_secondary_inventory_kg
+        self.pwr_secondary_energy_MJ = 0.0
+        self.pwr_secondary_pressure_mpa = c.pwr_secondary_reference_pressure_mpa
+        self.pwr_secondary_steam_flow_kg_s = 0.0
+        self.pwr_secondary_feedwater_flow_kg_s = 0.0
+        self.pwr_secondary_heat_transfer_MW = 0.0
+        self.pwr_secondary_mass_residual_kg_s = 0.0
+        self.pwr_secondary_energy_residual_MW = 0.0
+        z = (np.arange(c.pwr_axial_node_count, dtype=float) + 0.5) / c.pwr_axial_node_count
+        base = np.sin(np.pi * z)
+        self.pwr_axial_power_fraction = base / np.sum(base)
+        vapor = np.cumsum(self.pwr_axial_power_fraction)
+        self.pwr_axial_vapor_fraction = vapor / np.sum(vapor)
+        self.pwr_axial_void_fraction = np.zeros(c.pwr_axial_node_count, dtype=float)
+        self.pwr_axial_peak_node = int(np.argmax(self.pwr_axial_power_fraction)) + 1
+        self.pwr_axial_spatial_void_signal = 0.0
+        self.pwr_effective_rod_pct = 0.0
+        self.pwr_normal_power_target = 1.0
+        self.pwr_normal_power_damping_pcm = 0.0
         self.P = c.Pref
         self.M = c.Mref
         self.trip = False
@@ -530,7 +755,7 @@ class State:
 
 
 @dataclass
-class BWRState(State):
+class BWRState(PWRState):
     """BWR-only vessel, safety-system, level, and conservation state."""
 
     bwr_core_mass_kg: float = 0.0
@@ -620,6 +845,11 @@ class BWRState(State):
     bwr_axial_peak_node: int = 1
 
 
+# Backward-compatible names used by existing notebooks and front ends.
+Constants = PWRConstants
+State = PWRState
+
+
 @dataclass(frozen=True)
 class TimelineEvent:
     time_s: float
@@ -635,8 +865,8 @@ class TimelineEvent:
 class LWRTeachingSimulator:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.c = Constants()
-        self.state = State(self.c)
+        self.c = PWRConstants()
+        self.state = PWRState(self.c)
         self.steam_tables = SteamTables()
         self.physics = create_plant_model(self.c.plant_type, self.c, self.steam_tables)
         self.physics.initialize_state(self.state)
@@ -677,6 +907,9 @@ class LWRTeachingSimulator:
         self.auto_trip_var = tk.BooleanVar(value=True)
         self.bwr_system_availability = {
             name: True for name in ("rcic", "hpci", "ads", "lpci", "core_spray")
+        }
+        self.pwr_system_availability = {
+            name: True for name in ("hpsi", "lpsi", "accumulator", "recirculation")
         }
         self.hot_channel_coupling_var = tk.BooleanVar(value=True)
 
@@ -1170,7 +1403,7 @@ class LWRTeachingSimulator:
         )
         return self.hot_channel.solve(
             heat_fraction, self.clamp(s.P, 0.10, 17.50),
-            inlet_temperature, flow_fraction,
+            inlet_temperature, flow_fraction, s.pwr_axial_power_fraction,
         )
 
     def update_hot_channel_state(self, result: Optional[HotChannelResult]) -> None:
@@ -1214,6 +1447,41 @@ class LWRTeachingSimulator:
         min_dnbr = extrema("hot_dnbr", np.min, s.hot_min_dnbr)
         dnbr_text = "unavailable" if not np.isfinite(min_dnbr) else f"{min_dnbr:.2f}"
         coupling = "enabled" if bool(self.hot_channel_coupling_var.get()) else "disabled"
+        if self.c.plant_type == "PWR":
+            max_mass_residual = extrema(
+                "pwr_mass_residual", lambda values: np.max(np.abs(values)),
+                abs(s.pwr_mass_balance_residual_fraction_s),
+            )
+            max_energy_residual = extrema(
+                "pwr_energy_residual", lambda values: np.max(np.abs(values)),
+                abs(s.pwr_energy_balance_residual_MW),
+            )
+            max_projection_mass = extrema(
+                "pwr_projection_mass", lambda values: np.max(np.abs(values)),
+                abs(s.pwr_projection_mass_correction_fraction_s),
+            )
+            max_projection_energy = extrema(
+                "pwr_projection_energy", lambda values: np.max(np.abs(values)),
+                abs(s.pwr_projection_energy_correction_MW),
+            )
+            ledger_text = (
+                f"\nPWR protection demand: {'yes' if s.pwr_protection_demand else 'no'}"
+                f"\nPWR active protection channels: {s.pwr_active_protection_channels}"
+                f"\nPWR retained trip cause: {s.pwr_trip_cause}"
+                f"\nPWR HPSI / LPSI flow: {s.pwr_hpsi_flow_fraction_s:.3e} / "
+                f"{s.pwr_lpsi_flow_fraction_s:.3e} fraction/s"
+                f"\nPWR accumulator / recirculation flow: "
+                f"{s.pwr_accumulator_flow_fraction_s:.3e} / "
+                f"{s.pwr_recirculation_flow_fraction_s:.3e} fraction/s"
+                f"\nPWR accumulator inventory remaining: "
+                f"{100.0*s.pwr_accumulator_inventory_fraction:.1f}%"
+                f"\nMaximum PWR mass-balance residual: {max_mass_residual:.3e} fraction/s"
+                f"\nMaximum PWR energy-balance residual: {max_energy_residual:.3e} MW"
+                f"\nMaximum PWR projection mass correction: {max_projection_mass:.3e} fraction/s"
+                f"\nMaximum PWR projection energy correction: {max_projection_energy:.3e} MW"
+            )
+        else:
+            ledger_text = ""
         return (
             f"Scenario: {s.scenario_name}\n"
             f"Elapsed simulation time: {s.t:.1f} s\n"
@@ -1227,7 +1495,8 @@ class LWRTeachingSimulator:
             f"Minimum primary inventory: {extrema('M', np.min, 100.0 * s.M):.1f}%\n"
             f"Minimum pressure: {extrema('P', np.min, s.P):.2f} MPa\n"
             f"Minimum in-range W-3 DNBR: {dnbr_text}\n"
-            f"Reactor trip: {'yes' if s.trip else 'no'}\n"
+            f"Reactor trip: {'yes' if s.trip else 'no'}"
+            f"{ledger_text}\n"
             f"Recorded timeline events: {len(self.events)}"
         )
 
@@ -1637,6 +1906,8 @@ class LWRTeachingSimulator:
 
     def scram_now(self) -> None:
         self.state.trip = True
+        if self.c.plant_type == "PWR" and self.state.pwr_trip_cause == "None":
+            self.state.pwr_trip_cause = "Manual reactor trip"
         self.set_slider("rod", 100)
         self.set_slider("trim", 0)
         self.refresh_all(force=False)
@@ -1671,7 +1942,12 @@ class LWRTeachingSimulator:
             return commanded or flowing or (
                 bool(self.auto_eccs_var.get()) and s.M < 0.90
             )
-        manual = self.control_vars["eccs"].get() > 1.0
+        manual = any(
+            self.control_vars[name].get() > 1.0
+            for name in ("eccs", "pwr_hpsi", "pwr_lpsi", "pwr_recirculation")
+            if name in self.control_vars
+        )
+        component_flow = s.pwr_total_injection_fraction_s > 1.0e-8
         hot_coupling = (
             self.c.plant_type != "BWR" and bool(self.hot_channel_coupling_var.get())
         )
@@ -1693,7 +1969,7 @@ class LWRTeachingSimulator:
             or (s.P < 4.5 and s.M < 1.05)
             or (s.P < 2.0 and s.M < 1.10)
         )
-        return manual or automatic
+        return manual or automatic or component_flow
 
     def current_event_state(self) -> Dict[str, object]:
         s = self.state
@@ -2008,6 +2284,34 @@ class LWRTeachingSimulator:
             "hot_outlet_C", "hot_min_dnbr", "hot_dnbr_valid_nodes",
             "effective_eccs_percent", "break_out_inventory_fraction_s",
             "porv_out_inventory_fraction_s", "evaporation_out_inventory_fraction_s",
+            "pwr_stored_mass_rate_fraction_s", "pwr_boundary_mass_rate_fraction_s",
+            "pwr_mass_balance_residual_fraction_s", "pwr_stored_energy_rate_MW",
+            "pwr_boundary_energy_rate_MW", "pwr_energy_balance_residual_MW",
+            "pwr_projection_mass_correction_fraction_s",
+            "pwr_projection_energy_correction_MW",
+            "pwr_protection_demand", "pwr_active_protection_channels",
+            "pwr_trip_cause", "pwr_rps_high_flux_timer_s",
+            "pwr_rps_high_pressure_timer_s", "pwr_rps_low_inventory_timer_s",
+            "pwr_rps_low_flow_timer_s", "pwr_rps_thermal_timer_s",
+            "pwr_hpsi_flow_fraction_s", "pwr_lpsi_flow_fraction_s",
+            "pwr_accumulator_flow_fraction_s", "pwr_recirculation_flow_fraction_s",
+            "pwr_total_injection_fraction_s", "pwr_accumulator_inventory_percent",
+            "pwr_hpsi_latched", "pwr_lpsi_latched", "pwr_recirculation_latched",
+            "pwr_hpsi_head_margin_mpa", "pwr_lpsi_head_margin_mpa",
+            "pwr_primary_flow_percent", "pwr_pump_head_m",
+            "pwr_buoyancy_head_m", "pwr_loop_loss_head_m",
+            "pwr_core_temperature_C", "pwr_hot_leg_temperature_C",
+            "pwr_cold_leg_temperature_C", "pwr_pressurizer_liquid_inventory_percent",
+            "pwr_pressurizer_steam_inventory_percent", "pwr_surge_flow_fraction_s",
+            "pwr_secondary_mass_kg", "pwr_secondary_energy_MJ",
+            "pwr_secondary_pressure_mpa", "pwr_secondary_steam_flow_kg_s",
+            "pwr_secondary_feedwater_flow_kg_s", "pwr_secondary_heat_transfer_MW",
+            "pwr_secondary_mass_residual_kg_s", "pwr_secondary_energy_residual_MW",
+            "pwr_axial_power_zone_1", "pwr_axial_power_zone_2",
+            "pwr_axial_power_zone_3", "pwr_axial_power_zone_4",
+            "pwr_axial_void_zone_1", "pwr_axial_void_zone_2",
+            "pwr_axial_void_zone_3", "pwr_axial_void_zone_4",
+            "pwr_axial_peak_node", "pwr_axial_spatial_void_signal",
         ]
 
     def write_csv_row(self, indicated_power: float, decay_frac_now: float, rho_total: float, flow_eff: float) -> None:
@@ -2035,6 +2339,46 @@ class LWRTeachingSimulator:
             s.hot_dnbr_valid_nodes, f"{100.0 * s.effective_eccs_fraction:.5g}",
             f"{s.break_out_fraction_s:.5g}", f"{s.porv_out_fraction_s:.5g}",
             f"{s.evaporation_out_fraction_s:.5g}",
+            f"{s.pwr_stored_mass_rate_fraction_s:.5g}",
+            f"{s.pwr_boundary_mass_rate_fraction_s:.5g}",
+            f"{s.pwr_mass_balance_residual_fraction_s:.5g}",
+            f"{s.pwr_stored_energy_rate_MW:.5g}",
+            f"{s.pwr_boundary_energy_rate_MW:.5g}",
+            f"{s.pwr_energy_balance_residual_MW:.5g}",
+            f"{s.pwr_projection_mass_correction_fraction_s:.5g}",
+            f"{s.pwr_projection_energy_correction_MW:.5g}",
+            int(s.pwr_protection_demand), s.pwr_active_protection_channels,
+            s.pwr_trip_cause, f"{s.pwr_rps_high_flux_timer_s:.5g}",
+            f"{s.pwr_rps_high_pressure_timer_s:.5g}",
+            f"{s.pwr_rps_low_inventory_timer_s:.5g}",
+            f"{s.pwr_rps_low_flow_timer_s:.5g}",
+            f"{s.pwr_rps_thermal_timer_s:.5g}",
+            f"{s.pwr_hpsi_flow_fraction_s:.5g}",
+            f"{s.pwr_lpsi_flow_fraction_s:.5g}",
+            f"{s.pwr_accumulator_flow_fraction_s:.5g}",
+            f"{s.pwr_recirculation_flow_fraction_s:.5g}",
+            f"{s.pwr_total_injection_fraction_s:.5g}",
+            f"{100.0*s.pwr_accumulator_inventory_fraction:.5g}",
+            int(s.pwr_hpsi_latched), int(s.pwr_lpsi_latched),
+            int(s.pwr_recirculation_latched),
+            f"{s.pwr_hpsi_head_margin_mpa:.5g}",
+            f"{s.pwr_lpsi_head_margin_mpa:.5g}",
+            f"{100.0*s.pwr_primary_flow_fraction:.5g}",
+            f"{s.pwr_pump_head_m:.5g}", f"{s.pwr_buoyancy_head_m:.5g}",
+            f"{s.pwr_loop_loss_head_m:.5g}", f"{s.pwr_core_temperature_C:.5g}",
+            f"{s.pwr_hot_leg_temperature_C:.5g}", f"{s.pwr_cold_leg_temperature_C:.5g}",
+            f"{100.0*s.pwr_pressurizer_liquid_inventory_fraction:.5g}",
+            f"{100.0*s.pwr_pressurizer_steam_inventory_fraction:.5g}",
+            f"{s.pwr_surge_flow_fraction_s:.5g}", f"{s.pwr_secondary_mass_kg:.5g}",
+            f"{s.pwr_secondary_energy_MJ:.5g}", f"{s.pwr_secondary_pressure_mpa:.5g}",
+            f"{s.pwr_secondary_steam_flow_kg_s:.5g}",
+            f"{s.pwr_secondary_feedwater_flow_kg_s:.5g}",
+            f"{s.pwr_secondary_heat_transfer_MW:.5g}",
+            f"{s.pwr_secondary_mass_residual_kg_s:.5g}",
+            f"{s.pwr_secondary_energy_residual_MW:.5g}",
+            *(f"{value:.5g}" for value in s.pwr_axial_power_fraction),
+            *(f"{value:.5g}" for value in s.pwr_axial_void_fraction),
+            s.pwr_axial_peak_node, f"{s.pwr_axial_spatial_void_signal:.5g}",
         ]
         self.csv_writer.writerow(row)
         if int(s.t * 10) % 20 == 0:
@@ -2276,24 +2620,14 @@ class LWRTeachingSimulator:
         hot_coupling = (
             self.c.plant_type != "BWR" and bool(self.hot_channel_coupling_var.get())
         )
-        thermal_limit_temperature = max(
-            s.Tcl,
-            s.hot_peak_clad_C if np.isfinite(s.hot_peak_clad_C) else s.Tcl,
-        )
-        dnbr_trip = (
-            hot_coupling
-            and np.isfinite(s.hot_min_dnbr)
-            and s.hot_min_dnbr <= 1.0
-        )
         if self.c.plant_type == "BWR":
             automatic_trip_demand, _ = self.physics.evaluate_protection(s,dt)
             if bool(self.auto_trip_var.get()) and automatic_trip_demand:
                 s.trip = True
         else:
-            automatic_trip_demand = (
-                s.n > 1.18 or s.P > self.c.pressHigh or s.M < 0.82
-                or (hot_coupling and thermal_limit_temperature > self.c.cladWarn)
-                or dnbr_trip
+            automatic_trip_demand, _ = self.physics.evaluate_protection(
+                s, dt, self.control_vars["pump"].get(),
+                thermal_limit_enabled=hot_coupling,
             )
             if bool(self.auto_trip_var.get()) and automatic_trip_demand:
                 s.trip = True
@@ -2303,6 +2637,32 @@ class LWRTeachingSimulator:
         if s.trip:
             rod_pct = 100.0
             trim_pcm = min(trim_pcm, 0.0)
+            if self.c.plant_type == "PWR":
+                s.pwr_effective_rod_pct = rod_pct
+                s.pwr_normal_power_target = s.n
+                s.pwr_normal_power_damping_pcm = 0.0
+        elif self.c.plant_type == "PWR" and (
+            s.scenario_name == "Normal operation"
+            and self.control_vars["break"].get() <= 0.0
+            and (rod_pct > 1.0e-9 or s.pwr_effective_rod_pct > 1.0e-9)
+        ):
+            alpha = 1.0 - math.exp(-dt / self.c.pwr_normal_rod_maneuver_tau_s)
+            s.pwr_effective_rod_pct += alpha * (rod_pct - s.pwr_effective_rod_pct)
+            rod_pct = s.pwr_effective_rod_pct
+            s.pwr_normal_power_target = self.clamp(
+                1.0 - self.c.pwr_normal_power_target_slope * rod_pct / 100.0,
+                0.05, 1.20,
+            )
+            s.pwr_normal_power_damping_pcm = self.clamp(
+                self.c.pwr_normal_power_damping_gain_pcm
+                * (s.pwr_normal_power_target - s.n),
+                -500.0, 500.0,
+            )
+            trim_pcm += s.pwr_normal_power_damping_pcm
+        elif self.c.plant_type == "PWR":
+            s.pwr_effective_rod_pct = rod_pct
+            s.pwr_normal_power_target = s.n
+            s.pwr_normal_power_damping_pcm = 0.0
 
         if self.c.plant_type == "BWR":
             controls = BWRControlInputs(
@@ -2330,13 +2690,44 @@ class LWRTeachingSimulator:
                 critical_power_valid_nodes=s.hot_dnbr_valid_nodes,
             )
         else:
-            controls = ControlInputs(
+            pwr_mode = getattr(self, "pwr_control_mode", "simplified")
+            controls = PWRControlInputs(
                 rod_pct=rod_pct, trim_pcm=trim_pcm,
                 boron_ppm=self.control_vars["boron"].get(),
                 pump_pct=self.control_vars["pump"].get(),
                 sg_pct=self.control_vars["sg"].get(),
                 break_pct=self.control_vars["break"].get(),
-                eccs_pct=self.control_vars["eccs"].get(),
+                eccs_pct=(
+                    self.control_vars["eccs"].get()
+                    if pwr_mode == "simplified" else 0.0
+                ),
+                hpsi_pct=(
+                    self.control_vars["pwr_hpsi"].get()
+                    if pwr_mode == "advanced" and "pwr_hpsi" in self.control_vars
+                    else 0.0
+                ),
+                lpsi_pct=(
+                    self.control_vars["pwr_lpsi"].get()
+                    if pwr_mode == "advanced" and "pwr_lpsi" in self.control_vars
+                    else 0.0
+                ),
+                recirculation_pct=(
+                    self.control_vars["pwr_recirculation"].get()
+                    if pwr_mode == "advanced" and "pwr_recirculation" in self.control_vars
+                    else 0.0
+                ),
+                hpsi_available=getattr(
+                    self, "pwr_system_availability", {}
+                ).get("hpsi", True),
+                lpsi_available=getattr(
+                    self, "pwr_system_availability", {}
+                ).get("lpsi", True),
+                accumulator_available=getattr(
+                    self, "pwr_system_availability", {}
+                ).get("accumulator", True),
+                recirculation_available=getattr(
+                    self, "pwr_system_availability", {}
+                ).get("recirculation", True),
                 afw_pct=self.control_vars["afw"].get(),
                 porv_pct=self.control_vars["porv"].get(),
                 spray_pct=self.control_vars["spray"].get(),
@@ -2356,6 +2747,22 @@ class LWRTeachingSimulator:
         s.break_out_fraction_s = diagnostics.break_out
         s.porv_out_fraction_s = diagnostics.porv_out
         s.evaporation_out_fraction_s = diagnostics.evaporation_out
+        if self.c.plant_type == "PWR":
+            s.pwr_stored_mass_rate_fraction_s = diagnostics.pwr_stored_mass_rate_fraction_s
+            s.pwr_boundary_mass_rate_fraction_s = diagnostics.pwr_boundary_mass_rate_fraction_s
+            s.pwr_mass_balance_residual_fraction_s = diagnostics.pwr_mass_balance_residual_fraction_s
+            s.pwr_stored_energy_rate_MW = diagnostics.pwr_stored_energy_rate_MW
+            s.pwr_boundary_energy_rate_MW = diagnostics.pwr_boundary_energy_rate_MW
+            s.pwr_energy_balance_residual_MW = diagnostics.pwr_energy_balance_residual_MW
+            s.pwr_projection_mass_correction_fraction_s = diagnostics.pwr_projection_mass_correction_fraction_s
+            s.pwr_projection_energy_correction_MW = diagnostics.pwr_projection_energy_correction_MW
+            s.pwr_hpsi_flow_fraction_s = diagnostics.pwr_hpsi_in_fraction_s
+            s.pwr_lpsi_flow_fraction_s = diagnostics.pwr_lpsi_in_fraction_s
+            s.pwr_accumulator_flow_fraction_s = diagnostics.pwr_accumulator_in_fraction_s
+            s.pwr_recirculation_flow_fraction_s = diagnostics.pwr_recirculation_in_fraction_s
+            s.pwr_total_injection_fraction_s = diagnostics.pwr_total_injection_fraction_s
+            s.pwr_hpsi_head_margin_mpa = diagnostics.pwr_hpsi_head_margin_mpa
+            s.pwr_lpsi_head_margin_mpa = diagnostics.pwr_lpsi_head_margin_mpa
 
         # Discrete controls and observability are applied once after all four
         # RK stages; intermediate stages never mutate Tk variables or history.
@@ -2577,6 +2984,22 @@ class LWRTeachingSimulator:
         hist.hot_clad.append(s.hot_peak_clad_C)
         hist.hot_outlet.append(s.hot_outlet_C)
         hist.hot_dnbr.append(s.hot_min_dnbr)
+        hist.pwr_mass_residual.append(s.pwr_mass_balance_residual_fraction_s)
+        hist.pwr_energy_residual.append(s.pwr_energy_balance_residual_MW)
+        hist.pwr_projection_mass.append(s.pwr_projection_mass_correction_fraction_s)
+        hist.pwr_projection_energy.append(s.pwr_projection_energy_correction_MW)
+        hist.pwr_primary_flow.append(100.0 * s.pwr_primary_flow_fraction)
+        hist.pwr_core_temp.append(s.pwr_core_temperature_C)
+        hist.pwr_hot_leg_temp.append(s.pwr_hot_leg_temperature_C)
+        hist.pwr_cold_leg_temp.append(s.pwr_cold_leg_temperature_C)
+        hist.pwr_prz_liquid_inventory.append(100.0 * s.pwr_pressurizer_liquid_inventory_fraction)
+        hist.pwr_prz_steam_inventory.append(100.0 * s.pwr_pressurizer_steam_inventory_fraction)
+        hist.pwr_secondary_mass.append(s.pwr_secondary_mass_kg)
+        hist.pwr_secondary_pressure.append(s.pwr_secondary_pressure_mpa)
+        for index, value in enumerate(s.pwr_axial_power_fraction, start=1):
+            getattr(hist, f"pwr_axial_power_{index}").append(100.0 * value)
+        for index, value in enumerate(s.pwr_axial_void_fraction, start=1):
+            getattr(hist, f"pwr_axial_void_{index}").append(100.0 * value)
 
         self.write_csv_row(indicated_power, decay_frac_now, rho_total, flow_eff)
 

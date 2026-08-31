@@ -155,13 +155,24 @@ class HotChannelModel:
         inlet_pressure_mpa: float,
         inlet_temperature_C: float,
         flow_fraction: float,
+        axial_power_fractions: np.ndarray | None = None,
     ) -> HotChannelResult:
         g = self.geometry
         count = g.node_count
         dz = g.heated_length_m / count
         z = (np.arange(count, dtype=float) + 0.5) * dz
-        shape = np.sin(math.pi * z / g.heated_length_m)
-        shape /= float(np.mean(shape))
+        if axial_power_fractions is None:
+            shape = np.sin(math.pi * z / g.heated_length_m)
+            shape /= float(np.mean(shape))
+        else:
+            coarse = np.maximum(np.asarray(axial_power_fractions, dtype=float), 0.0)
+            if coarse.size < 2 or float(np.sum(coarse)) <= 0.0:
+                raise ValueError("axial_power_fractions must contain positive zone shares")
+            coarse /= float(np.sum(coarse))
+            coarse_z = (np.arange(coarse.size, dtype=float) + 0.5) / coarse.size
+            shape = np.interp(z / g.heated_length_m, coarse_z, coarse,
+                              left=coarse[0], right=coarse[-1])
+            shape /= float(np.mean(shape))
 
         power_scale = max(0.0, power_fraction)
         linear_heat = (

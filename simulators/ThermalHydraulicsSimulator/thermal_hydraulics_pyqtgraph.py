@@ -60,7 +60,11 @@ PWR_SLIDER_SPECS = (
     ("rod", "Rod insertion %", 1), ("trim", "Fine reactivity pcm", 1),
     ("boron", "Soluble boron ppm", 1), ("pump", "Primary pump %", 1),
     ("sg", "SG heat removal %", 1), ("break", "LOCA break size %", 1),
-    ("eccs", "Manual ECCS %", 1), ("afw", "Auxiliary feedwater %", 1),
+    ("eccs", "Combined ECCS command (simplified) %", 1),
+    ("pwr_hpsi", "Manual HPSI %", 1),
+    ("pwr_lpsi", "Manual LPSI / reflood %", 1),
+    ("pwr_recirculation", "Manual sump recirculation %", 1),
+    ("afw", "Auxiliary feedwater %", 1),
     ("porv", "PORV / relief %", 1), ("spray", "Pressurizer spray %", 1),
     ("heater", "Pressurizer heater %", 1), ("rhr", "RHR cooldown %", 1),
     ("noise", "Instrument noise %", 10), ("speed", "Simulation speed", 10),
@@ -92,7 +96,8 @@ _SLIDER_SPECS_BY_KEY = {
 }
 _SLIDER_BUILD_ORDER = (
     "rod", "trim", "boron", "pump", "sg", "break", "recirc", "feedwater",
-    "main_steam", "msiv", "bypass", "eccs", "afw", "porv", "spray",
+    "main_steam", "msiv", "bypass", "eccs", "pwr_hpsi", "pwr_lpsi",
+    "pwr_recirculation", "afw", "porv", "spray",
     "heater", "rhr", "srv", "bwr_break", "rcic", "hpci", "ads", "lpci",
     "core_spray", "shutdown_cooling", "noise", "speed",
 )
@@ -382,6 +387,17 @@ class MainWindow(QMainWindow):
         self.sliders, self.slider_values, self.slider_rows, self.slider_labels = {}, {}, {}, {}
         primary = QGroupBox("CORE / PRIMARY CONTROLS"); pform = QVBoxLayout(primary); form.addWidget(primary)
         safety = QGroupBox("SAFETY / SUPPORT"); sform = QVBoxLayout(safety); form.addWidget(safety)
+        self.pwr_mode_widget = QWidget(); pwr_mode_layout = QVBoxLayout(self.pwr_mode_widget)
+        pwr_mode_layout.setContentsMargins(0, 0, 0, 4)
+        pwr_mode_layout.addWidget(QLabel("PWR ECCS CONTROL DETAIL"))
+        self.pwr_mode_combo = QComboBox()
+        self.pwr_mode_combo.addItems(("Simplified", "Advanced"))
+        self.pwr_mode_combo.currentTextChanged.connect(self.pwr_control_mode_changed)
+        pwr_mode_layout.addWidget(self.pwr_mode_combo)
+        self.pwr_mode_help = QLabel()
+        self.pwr_mode_help.setWordWrap(True)
+        pwr_mode_layout.addWidget(self.pwr_mode_help)
+        sform.addWidget(self.pwr_mode_widget)
         primary_keys = {"rod", "trim", "boron", "pump", "sg", "break", "recirc", "feedwater", "main_steam", "msiv", "bypass"}
         for key, label, scale in ALL_SLIDER_SPECS:
             target = pform if key in primary_keys else sform
@@ -401,6 +417,8 @@ class MainWindow(QMainWindow):
         for key, label in (("eccs", "Auto ECCS logic"), ("trip", "Auto reactor trip"), ("hot_channel", "Couple axial hot channel")):
             check = QCheckBox(label); check.toggled.connect(lambda enabled, k=key: self.automatic_changed(k, enabled)); sform.addWidget(check); self.checks[key] = check
         for key, label in (("avail_rcic", "RCIC available"), ("avail_hpci", "HPCI available"), ("avail_ads", "ADS available"), ("avail_lpci", "LPCI available"), ("avail_core_spray", "Core spray available")):
+            check = QCheckBox(label); check.setChecked(True); check.toggled.connect(lambda enabled, k=key: self.automatic_changed(k, enabled)); sform.addWidget(check); self.checks[key] = check
+        for key, label in (("pwr_avail_hpsi", "HPSI available"), ("pwr_avail_lpsi", "LPSI available"), ("pwr_avail_accumulator", "Accumulators available"), ("pwr_avail_recirculation", "Sump recirculation available")):
             check = QCheckBox(label); check.setChecked(True); check.toggled.connect(lambda enabled, k=key: self.automatic_changed(k, enabled)); sform.addWidget(check); self.checks[key] = check
         demo_box = QGroupBox("STABILIZATION / RECOVERY DEMONSTRATION"); demo_layout = QVBoxLayout(demo_box)
         self.demo_combo = QComboBox(); self.demo_combo.addItems(DEMO_SCRIPTS); demo_layout.addWidget(self.demo_combo)
@@ -453,11 +471,41 @@ class MainWindow(QMainWindow):
         if key.startswith("avail_"):
             system = key.removeprefix("avail_")
             self.backend.set_bwr_system_available(system, enabled)
-            self._set_bwr_command_available(system, enabled)
+            self._set_command_available(system, enabled)
+        elif key.startswith("pwr_avail_"):
+            system = key.removeprefix("pwr_avail_")
+            self.backend.set_pwr_system_available(system, enabled)
+            self._set_command_available(f"pwr_{system}", enabled)
         else:
             self.backend.set_automatic(key, enabled)
 
-    def _set_bwr_command_available(self, system, available):
+    def pwr_control_mode_changed(self, text):
+        if self.syncing or self.backend.plant_type != "PWR":
+            return
+        self.backend.set_pwr_control_mode(text.lower())
+        self.sync_controls()
+        self.apply_pwr_control_mode_ui()
+
+    def apply_pwr_control_mode_ui(self):
+        pwr = self.backend.plant_type == "PWR"
+        mode = self.backend.pwr_control_mode
+        self.pwr_mode_widget.setVisible(pwr)
+        if not pwr:
+            return
+        simplified = mode == "simplified"
+        self.slider_rows["eccs"].setVisible(simplified)
+        for key in ("pwr_hpsi", "pwr_lpsi", "pwr_recirculation"):
+            self.slider_rows[key].setVisible(not simplified)
+        for key in ("pwr_avail_hpsi", "pwr_avail_lpsi",
+                    "pwr_avail_accumulator", "pwr_avail_recirculation"):
+            self.checks[key].setVisible(not simplified)
+        self.pwr_mode_help.setText(
+            "One combined teaching command; individual injection commands are hidden."
+            if simplified else
+            "Independent HPSI, LPSI/reflood, and sump-recirculation commands; the combined command is disabled."
+        )
+
+    def _set_command_available(self, system, available):
         """Make an unavailable injection path visibly non-operable."""
         slider = self.sliders.get(system)
         row = self.slider_rows.get(system)
@@ -499,7 +547,14 @@ class MainWindow(QMainWindow):
                 button.setEnabled(True)
         bwr = self.backend.plant_type == "BWR"
         for key, check in self.checks.items():
-            check.setVisible((bwr and key.startswith("avail_")) or (not bwr and not key.startswith("avail_")) or key in ("eccs", "trip"))
+            is_bwr_availability = key.startswith("avail_")
+            is_pwr_availability = key.startswith("pwr_avail_")
+            check.setVisible(
+                (bwr and is_bwr_availability)
+                or (not bwr and is_pwr_availability)
+                or key in ("eccs", "trip")
+                or (not bwr and key == "hot_channel")
+            )
         self.checks["eccs"].setText("Auto BWR safety systems" if bwr else "Auto ECCS logic")
         self.checks["trip"].setText("Auto reactor trip")
         self.demo_combo.blockSignals(True)
@@ -511,22 +566,37 @@ class MainWindow(QMainWindow):
         self.bar_labels["inventory"].setText("VESSEL LIQUID INVENTORY" if bwr else "PRIMARY INVENTORY")
         self.bar_labels["dnbr"].setText("DIAGNOSTIC CPR MARGIN" if bwr else "AXIAL DNBR MARGIN")
         for name, available in self.sim.bwr_system_availability.items():
-            self._set_bwr_command_available(name, bwr and bool(available))
+            self._set_command_available(name, bwr and bool(available))
+        for name, available in self.sim.pwr_system_availability.items():
+            self._set_command_available(
+                f"pwr_{name}", not bwr and bool(available)
+            )
+        self.apply_pwr_control_mode_ui()
 
     def sync_controls(self):
         self.syncing = True
         try:
             self.plant_radios[self.backend.plant_type].setChecked(True)
+            self.pwr_mode_combo.setCurrentIndex(
+                0 if self.backend.pwr_control_mode == "simplified" else 1
+            )
             for key, _label, scale in ALL_SLIDER_SPECS:
                 value = self.speed if key == "speed" else self.sim.control_vars[key].get()
                 self.sliders[key].setValue(round(value*scale)); self.slider_values[key].setText(f"{value:.1f}{'x' if key == 'speed' else ''}")
             for check, value in (("eccs", self.sim.auto_eccs_var.get()), ("trip", self.sim.auto_trip_var.get()), ("hot_channel", self.sim.hot_channel_coupling_var.get())): self.checks[check].setChecked(bool(value))
             for name, available in self.sim.bwr_system_availability.items():
                 self.checks[f"avail_{name}"].setChecked(bool(available))
-                self._set_bwr_command_available(
+                self._set_command_available(
                     name, self.backend.plant_type == "BWR" and bool(available)
                 )
+            for name, available in self.sim.pwr_system_availability.items():
+                self.checks[f"pwr_avail_{name}"].setChecked(bool(available))
+                self._set_command_available(
+                    f"pwr_{name}",
+                    self.backend.plant_type == "PWR" and bool(available),
+                )
         finally: self.syncing = False
+        self.apply_pwr_control_mode_ui()
 
     def scram(self): self.backend.scram(); self.sync_controls()
 
@@ -561,7 +631,7 @@ class MainWindow(QMainWindow):
         if self.backend.plant_type == "BWR":
             text = (f"Scenario: {s.scenario_name}\nSimulation time: {s.t:.2f} s\nPower: {100*s.n:.2f} %\nVessel pressure: {s.P:.3f} MPa\nCollapsed / indicated level: {s.bwr_collapsed_level_m:.2f} / {s.bwr_indicated_level_m:.2f} m\nCore void fraction: {100*s.void_fraction:.2f} %\nCore flow: {100*s.bwr_core_flow_fraction:.1f} %\nPump + buoyancy / friction head: {s.bwr_pump_head_m:.1f} + {s.bwr_buoyancy_head_m:.1f} / {s.bwr_friction_head_m:.1f} m\nReference-leg temperature: {s.bwr_reference_leg_temperature_C:.1f} °C\nSteam / feedwater / SRV flow: {s.bwr_steam_flow_kg_s:.1f} / {s.bwr_feedwater_flow_kg_s:.1f} / {s.bwr_srv_flow_kg_s:.1f} kg/s\nFuel / clad / saturation: {s.Tf:.1f} / {s.Tcl:.1f} / {s.Tc:.1f} °C\nRecorded events: {len(self.sim.events)}")
         else:
-            text = (f"Scenario: {s.scenario_name}\nSimulation time: {s.t:.2f} s\nPower: {100*s.n:.2f} %\nPressure: {s.P:.3f} MPa\nInventory: {100*s.M:.2f} %\nVoid fraction: {100*s.void_fraction:.2f} %\nFuel / clad / coolant: {s.Tf:.1f} / {s.Tcl:.1f} / {s.Tc:.1f} °C\nBoiling regime: {s.boiling_regime}\nCHF ratio: {s.chf_ratio:.3f}\nRecorded events: {len(self.sim.events)}")
+            text = (f"Scenario: {s.scenario_name}\nSimulation time: {s.t:.2f} s\nPower: {100*s.n:.2f} %\nPressure: {s.P:.3f} MPa\nInventory: {100*s.M:.2f} %\nPrimary flow: {100*s.pwr_primary_flow_fraction:.1f} %\nPump + buoyancy / loop loss head: {s.pwr_pump_head_m:.1f} + {s.pwr_buoyancy_head_m:.1f} / {s.pwr_loop_loss_head_m:.1f} m\nCore / hot-leg / cold-leg temperature: {s.pwr_core_temperature_C:.1f} / {s.pwr_hot_leg_temperature_C:.1f} / {s.pwr_cold_leg_temperature_C:.1f} °C\nPressurizer liquid / steam inventory: {100*s.pwr_pressurizer_liquid_inventory_fraction:.2f} / {100*s.pwr_pressurizer_steam_inventory_fraction:.2f} % primary\nSG secondary pressure / mass: {s.pwr_secondary_pressure_mpa:.3f} MPa / {s.pwr_secondary_mass_kg:.0f} kg\nSG steam / feedwater flow: {s.pwr_secondary_steam_flow_kg_s:.1f} / {s.pwr_secondary_feedwater_flow_kg_s:.1f} kg/s\nAxial power shares: {' / '.join(f'{100*x:.1f}%' for x in s.pwr_axial_power_fraction)}\nAxial void: {' / '.join(f'{100*x:.1f}%' for x in s.pwr_axial_void_fraction)} (peak-power zone {s.pwr_axial_peak_node})\nFuel / clad / bulk coolant: {s.Tf:.1f} / {s.Tcl:.1f} / {s.Tc:.1f} °C\nBoiling regime: {s.boiling_regime}\nCHF ratio: {s.chf_ratio:.3f}\nRecorded events: {len(self.sim.events)}")
         QMessageBox.information(self, "Scenario Summary", text)
 
     def export_csv(self, path=None):
@@ -570,7 +640,7 @@ class MainWindow(QMainWindow):
             path, _ = QFileDialog.getSaveFileName(self, "Export simulation history", str(default), "CSV files (*.csv)")
         if not path: return
         path = Path(path).with_suffix(".csv"); path.parent.mkdir(parents=True, exist_ok=True)
-        columns = ("t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "void", "flow", "rho", "hot_clad")
+        columns = ("t", "pow", "dec", "Tf", "Tcl", "Tc", "P", "M", "void", "flow", "rho", "hot_clad", "pwr_primary_flow", "pwr_core_temp", "pwr_hot_leg_temp", "pwr_cold_leg_temp", "pwr_prz_liquid_inventory", "pwr_prz_steam_inventory", "pwr_secondary_mass", "pwr_secondary_pressure", "pwr_axial_power_1", "pwr_axial_power_2", "pwr_axial_power_3", "pwr_axial_power_4", "pwr_axial_void_1", "pwr_axial_void_2", "pwr_axial_void_3", "pwr_axial_void_4")
         with path.open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream); writer.writerow(columns); writer.writerows(zip(*(getattr(self.state.hist, name) for name in columns)))
         self.sim.record_event("CSV", f"Exported history to {path.name}"); self.refresh()
@@ -622,7 +692,24 @@ class MainWindow(QMainWindow):
                 +f" | peak-power node {s.bwr_axial_peak_node}"
             )
         else:
-            self.readout.setText(f"Power / decay: {100*s.n:7.2f} / {decay:6.2f} %\nPressure: {s.P:7.2f} MPa\nInventory / void: {100*s.M:6.1f} / {100*s.void_fraction:5.1f} %\nFuel / clad / coolant: {s.Tf:6.0f} / {s.Tcl:6.0f} / {s.Tc:6.1f} °C\nEffective flow: {flow:6.1f} %\nReactivity: {rho:+7.0f} pcm\nBoiling: {s.boiling_regime}\nCHF ratio / axial MDNBR: {s.chf_ratio:.2f} / {dnbr_text}\nLatest event: {event}")
+            self.readout.setText(f"Power / decay: {100*s.n:7.2f} / {decay:6.2f} %\nPressure: {s.P:7.2f} MPa\nInventory / void: {100*s.M:6.1f} / {100*s.void_fraction:5.1f} %\nPrimary loop flow: {100*s.pwr_primary_flow_fraction:6.1f} %\nPump + buoyancy / loss head: {s.pwr_pump_head_m:5.1f} + {s.pwr_buoyancy_head_m:4.1f} / {s.pwr_loop_loss_head_m:5.1f} m\nCore / hot / cold leg: {s.pwr_core_temperature_C:6.1f} / {s.pwr_hot_leg_temperature_C:6.1f} / {s.pwr_cold_leg_temperature_C:6.1f} °C\nPressurizer liquid / steam: {100*s.pwr_pressurizer_liquid_inventory_fraction:5.2f} / {100*s.pwr_pressurizer_steam_inventory_fraction:5.2f} % primary\nSG pressure / inventory: {s.pwr_secondary_pressure_mpa:5.2f} MPa / {s.pwr_secondary_mass_kg:7.0f} kg\nSG steam / feedwater: {s.pwr_secondary_steam_flow_kg_s:7.1f} / {s.pwr_secondary_feedwater_flow_kg_s:7.1f} kg/s\nFuel / clad / bulk coolant: {s.Tf:6.0f} / {s.Tcl:6.0f} / {s.Tc:6.1f} °C\nReactivity: {rho:+7.0f} pcm\nBoiling: {s.boiling_regime}\nCHF ratio / axial MDNBR: {s.chf_ratio:.2f} / {dnbr_text}\nProtection demand / cause: {'YES' if s.pwr_protection_demand else 'NO'} / {s.pwr_trip_cause}\nActive channels: {s.pwr_active_protection_channels}\nHPSI / LPSI: {100*s.pwr_hpsi_flow_fraction_s:6.3f} / {100*s.pwr_lpsi_flow_fraction_s:6.3f} inventory %/s\nAccumulator / recirc: {100*s.pwr_accumulator_flow_fraction_s:6.3f} / {100*s.pwr_recirculation_flow_fraction_s:6.3f} inventory %/s\nAccumulator remaining: {100*s.pwr_accumulator_inventory_fraction:5.1f}%\nLatest event: {event}")
+            normal_rod_maneuver = (
+                not s.trip and s.scenario_name == "Normal operation"
+                and self.sim.control_vars["break"].get() <= 0.0
+                and s.pwr_effective_rod_pct > 1.0e-6
+            )
+            if normal_rod_maneuver:
+                self.readout.setText(
+                    self.readout.text()
+                    + f"\nNormal maneuver target: {100*s.pwr_normal_power_target:5.1f}%  ⓘ"
+                )
+                self.readout.setToolTip(
+                    "After rod insertion, lumped thermal and reactivity feedback can let power "
+                    "recover toward this equilibrium target; this does not represent rod withdrawal."
+                )
+            else:
+                self.readout.setToolTip("")
+            self.readout.setText(self.readout.text() + "\nAxial power shares: " + " / ".join(f"{100*x:4.1f}%" for x in s.pwr_axial_power_fraction) + "\nAxial void: " + " / ".join(f"{100*x:4.1f}%" for x in s.pwr_axial_void_fraction) + f" | peak-power zone {s.pwr_axial_peak_node}")
         self.events.setPlainText("\n".join(f"{item.time_s:7.1f} s  {item.category:<10}  {item.message}" for item in self.sim.events))
         metrics = (("power",100*s.n,150,"%"),("inventory",100*s.M,120,"%"),("pressure",s.P,18," MPa"),("clad",s.Tcl,1200," °C"),("dnbr",min(dnbr,3) if np.isfinite(dnbr) else 0,3,""))
         for key, value, maximum, unit in metrics:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, Tuple
 
 import numpy as np
@@ -12,7 +12,8 @@ from steam_properties import SteamTables
 
 
 @dataclass(frozen=True)
-class ControlInputs:
+class PWRControlInputs:
+    """Operator and protection inputs accepted by the PWR plant model."""
     rod_pct: float = 0.0
     trim_pcm: float = 0.0
     boron_ppm: float = 1000.0
@@ -20,6 +21,15 @@ class ControlInputs:
     sg_pct: float = 100.0
     break_pct: float = 0.0
     eccs_pct: float = 0.0
+    hpsi_pct: float = 0.0
+    lpsi_pct: float = 0.0
+    recirculation_pct: float = 0.0
+    accumulator_enabled: bool = True
+    hpsi_available: bool = True
+    lpsi_available: bool = True
+    accumulator_available: bool = True
+    recirculation_available: bool = True
+    accumulator_inventory_fraction: float = 1.0
     afw_pct: float = 0.0
     porv_pct: float = 0.0
     spray_pct: float = 0.0
@@ -33,7 +43,8 @@ class ControlInputs:
 
 
 @dataclass(frozen=True)
-class StepDiagnostics:
+class PWRStepDiagnostics:
+    """Diagnostics published by one PWR right-hand-side evaluation."""
     decay_fraction: float
     rho_total: float
     flow_effective: float
@@ -43,6 +54,21 @@ class StepDiagnostics:
     break_out: float
     porv_out: float
     evaporation_out: float
+    pwr_stored_mass_rate_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_boundary_mass_rate_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_mass_balance_residual_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_stored_energy_rate_MW: float = field(default=0.0, kw_only=True)
+    pwr_boundary_energy_rate_MW: float = field(default=0.0, kw_only=True)
+    pwr_energy_balance_residual_MW: float = field(default=0.0, kw_only=True)
+    pwr_projection_mass_correction_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_projection_energy_correction_MW: float = field(default=0.0, kw_only=True)
+    pwr_hpsi_in_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_lpsi_in_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_accumulator_in_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_recirculation_in_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_total_injection_fraction_s: float = field(default=0.0, kw_only=True)
+    pwr_hpsi_head_margin_mpa: float = field(default=0.0, kw_only=True)
+    pwr_lpsi_head_margin_mpa: float = field(default=0.0, kw_only=True)
 
 
 class ThermalHydraulicsEngine:
@@ -80,6 +106,13 @@ class ThermalHydraulicsEngine:
         else:
             factor = 1.0
         return self.clamp(factor, 0.05, 1.0)
+
+    @staticmethod
+    def pump_curve_fraction(pressure: float, shutoff_pressure: float) -> float:
+        """Generic quadratic pump curve expressed as a runout-flow fraction."""
+        if shutoff_pressure <= 0.0 or pressure >= shutoff_pressure:
+            return 0.0
+        return math.sqrt(max(0.0, 1.0 - pressure / shutoff_pressure))
 
     def pack(self, state: Any) -> np.ndarray:
         return np.concatenate(
@@ -147,8 +180,8 @@ class ThermalHydraulicsEngine:
         return conductance, demand, regime, chf_ratio
 
     def rhs(
-        self, _time_s: float, vector: np.ndarray, controls: ControlInputs,
-    ) -> Tuple[np.ndarray, StepDiagnostics]:
+        self, _time_s: float, vector: np.ndarray, controls: PWRControlInputs,
+    ) -> Tuple[np.ndarray, PWRStepDiagnostics]:
         c = self.c
         y = np.asarray(vector, dtype=float)
         n = max(0.0, float(y[self.I_N]))
@@ -226,7 +259,7 @@ class ThermalHydraulicsEngine:
                     automatic_eccs = max(automatic_eccs, 0.85)
                 if pressure < 2.0 and mass < 1.10:
                     automatic_eccs = 1.0
-        eccs = max(controls.eccs_pct / 100.0, automatic_eccs)
+        legacy_eccs = max(controls.eccs_pct / 100.0, automatic_eccs)
 
         break_fraction = max(0.0, controls.break_pct / 100.0)
         porv_fraction = max(0.0, controls.porv_pct / 100.0)
@@ -241,7 +274,53 @@ class ThermalHydraulicsEngine:
             0.0, min(boiling_demand, Qcc - 0.5 * Qsg)
         )
         evaporation_out = evaporation_power / (c.Ccool * c.latent_heat_equiv_C)
-        eccs_in = c.eccs_coeff * eccs * self.pressure_eccs_factor(pressure)
+        hpsi_command = max(controls.hpsi_pct / 100.0, legacy_eccs)
+        lpsi_command = max(controls.lpsi_pct / 100.0, legacy_eccs)
+        recirculation_command = max(
+            controls.recirculation_pct / 100.0, legacy_eccs
+        )
+        hpsi_curve = self.pump_curve_fraction(
+            pressure, c.pwr_hpsi_shutoff_pressure_mpa
+        )
+        lpsi_curve = self.pump_curve_fraction(
+            pressure, c.pwr_lpsi_shutoff_pressure_mpa
+        )
+        recirculation_curve = self.pump_curve_fraction(
+            pressure, c.pwr_recirculation_shutoff_pressure_mpa
+        )
+        hpsi_in = (
+            c.pwr_hpsi_runout_fraction_s * hpsi_command * hpsi_curve
+            if controls.hpsi_available else 0.0
+        )
+        lpsi_in = (
+            c.pwr_lpsi_runout_fraction_s * lpsi_command * lpsi_curve
+            if controls.lpsi_available else 0.0
+        )
+        accumulator_head = max(
+            0.0, c.pwr_accumulator_set_pressure_mpa - pressure
+        )
+        accumulator_in = (
+            c.pwr_accumulator_flow_coefficient_fraction_s_mpa_sqrt
+            * math.sqrt(accumulator_head)
+            * self.clamp(controls.accumulator_inventory_fraction, 0.0, 1.0)
+            if (
+                controls.accumulator_enabled
+                and controls.accumulator_available
+                and controls.accumulator_inventory_fraction > 0.0
+            ) else 0.0
+        )
+        recirculation_in = (
+            c.pwr_recirculation_runout_fraction_s
+            * recirculation_command * recirculation_curve
+            if controls.recirculation_available and break_fraction > 0.0 else 0.0
+        )
+        eccs_in = hpsi_in + lpsi_in + accumulator_in + recirculation_in
+        eccs = self.clamp(max(
+            legacy_eccs, hpsi_command if controls.hpsi_available else 0.0,
+            lpsi_command if controls.lpsi_available else 0.0,
+            recirculation_command if controls.recirculation_available else 0.0,
+            1.0 if accumulator_in > 0.0 else 0.0,
+        ), 0.0, 1.0)
 
         total_out = break_out + porv_out + evaporation_out
         if mass <= 0.05 and eccs_in < total_out:
@@ -292,9 +371,43 @@ class ThermalHydraulicsEngine:
             + 12.0 * eccs_in
         )
 
-        return derivatives, StepDiagnostics(
+        stored_mass_rate = float(derivatives[self.I_M])
+        boundary_mass_rate = eccs_in - break_out - porv_out - evaporation_out
+        stored_energy_rate = (
+            c.Cfuel * float(derivatives[self.I_TF])
+            + c.Cclad * float(derivatives[self.I_TCL])
+            + float(derivatives[self.I_UCOOL])
+        )
+        boundary_energy_rate = (
+            generated_power - Qsg - Qrhr + eccs_in * injection_h
+            - (break_out + porv_out) * discharge_h
+            - evaporation_out * steam_h
+        )
+
+        return derivatives, PWRStepDiagnostics(
             decay_fraction, rho_total, flow_effective, regime, chf_ratio, eccs,
             break_out, porv_out, evaporation_out,
+            pwr_stored_mass_rate_fraction_s=stored_mass_rate,
+            pwr_boundary_mass_rate_fraction_s=boundary_mass_rate,
+            pwr_mass_balance_residual_fraction_s=(
+                stored_mass_rate - boundary_mass_rate
+            ),
+            pwr_stored_energy_rate_MW=stored_energy_rate,
+            pwr_boundary_energy_rate_MW=boundary_energy_rate,
+            pwr_energy_balance_residual_MW=(
+                stored_energy_rate - boundary_energy_rate
+            ),
+            pwr_hpsi_in_fraction_s=hpsi_in,
+            pwr_lpsi_in_fraction_s=lpsi_in,
+            pwr_accumulator_in_fraction_s=accumulator_in,
+            pwr_recirculation_in_fraction_s=recirculation_in,
+            pwr_total_injection_fraction_s=eccs_in,
+            pwr_hpsi_head_margin_mpa=(
+                c.pwr_hpsi_shutoff_pressure_mpa - pressure
+            ),
+            pwr_lpsi_head_margin_mpa=(
+                c.pwr_lpsi_shutoff_pressure_mpa - pressure
+            ),
         )
 
     def project(self, vector: np.ndarray) -> np.ndarray:
@@ -317,7 +430,9 @@ class ThermalHydraulicsEngine:
         y[self.I_UCOOL] = c.Ccool * mass * (temperature - c.coolant_energy_reference_C)
         return y
 
-    def step(self, state: Any, controls: ControlInputs, dt: float) -> StepDiagnostics:
+    def step(
+        self, state: Any, controls: PWRControlInputs, dt: float,
+    ) -> PWRStepDiagnostics:
         if not np.isfinite(dt) or dt <= 0.0:
             raise ValueError("dt must be finite and positive")
         y0 = self.pack(state)
@@ -325,8 +440,20 @@ class ThermalHydraulicsEngine:
         k2, _ = self.rhs(state.t + 0.5 * dt, y0 + 0.5 * dt * k1, controls)
         k3, _ = self.rhs(state.t + 0.5 * dt, y0 + 0.5 * dt * k2, controls)
         k4, _ = self.rhs(state.t + dt, y0 + dt * k3, controls)
-        final = self.project(y0 + dt * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0)
+        candidate = y0 + dt * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+        final = self.project(candidate)
         _, diagnostics = self.rhs(state.t + dt, final, controls)
+        projection_mass_rate = float(final[self.I_M] - candidate[self.I_M]) / dt
+        projection_energy_rate = (
+            self.c.Cfuel * float(final[self.I_TF] - candidate[self.I_TF])
+            + self.c.Cclad * float(final[self.I_TCL] - candidate[self.I_TCL])
+            + float(final[self.I_UCOOL] - candidate[self.I_UCOOL])
+        ) / dt
+        diagnostics = replace(
+            diagnostics,
+            pwr_projection_mass_correction_fraction_s=projection_mass_rate,
+            pwr_projection_energy_correction_MW=projection_energy_rate,
+        )
 
         state.n = float(final[self.I_N])
         state.Ci = final[self.I_CI].copy()
@@ -342,3 +469,9 @@ class ThermalHydraulicsEngine:
         state.chf_ratio = diagnostics.chf_ratio
         state.t += dt
         return diagnostics
+
+
+# Compatibility aliases retained for third-party teaching notebooks and the
+# BWR diagnostic base class. New code should use the explicit PWR names.
+ControlInputs = PWRControlInputs
+StepDiagnostics = PWRStepDiagnostics
