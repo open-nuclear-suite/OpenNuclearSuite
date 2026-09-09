@@ -13,6 +13,8 @@ from .void_models import VOID_FRACTION_MODELS
 
 
 EXPORTED_CONTROLS = (
+    "progression", "four_channel_box", "channel_selector", "channel_power_factors",
+    "channel_flow_factors", "channel_map_buttons", "channel_map_group", "progression_note",
     "pressure", "temperature", "flow", "heat", "heat_shape", "heat_shape_parameter", "power_factor",
     "flow_factor", "length", "unheated_inlet", "unheated_outlet", "pitch_mm",
     "rod_od_mm", "clad_id_mm", "roughness_um", "inclination", "nodes",
@@ -57,6 +59,65 @@ class SubchannelControlPanel(QtWidgets.QWidget):
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(6)
         form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+
+        self.progression = QtWidgets.QComboBox()
+        self.progression.addItem("1 — Single channel", "single")
+        self.progression.addItem("2 — NESWC common plenum", "neswc_independent")
+        self.progression.addItem("3 — Crossflow (deferred)", "crossflow")
+        crossflow_item = self.progression.model().item(2)
+        if crossflow_item is not None:
+            crossflow_item.setEnabled(False)
+        self.progression_note = self._status(
+            "Single axial channel. Start here for conservation, boiling, CHF, and DNBR."
+        )
+
+        self.four_channel_box = QtWidgets.QGroupBox("NESWC COMMON-PLENUM CHANNELS")
+        four_layout = QtWidgets.QGridLayout(self.four_channel_box)
+        four_layout.addWidget(QtWidgets.QLabel("Channel"), 0, 0)
+        four_layout.addWidget(QtWidgets.QLabel("Power ×"), 0, 1)
+        four_layout.addWidget(QtWidgets.QLabel("Solved flow ×"), 0, 2)
+        self.channel_power_factors = []
+        self.channel_flow_factors = []
+        labels = ("N", "E", "S", "W", "C")
+        power_defaults = (1.00, 1.00, 1.00, 1.00, 1.08)
+        for row, (label, power_default) in enumerate(zip(labels, power_defaults), start=1):
+            power = _spin(power_default, 0.10, 3.00, 3)
+            flow = _spin(1.0, 0.0, 5.00, 3)
+            flow.setReadOnly(True)
+            flow.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+            flow.setToolTip("Calculated by the common-plenum pressure-drop balance")
+            self.channel_power_factors.append(power)
+            self.channel_flow_factors.append(flow)
+            four_layout.addWidget(QtWidgets.QLabel(label), row, 0)
+            four_layout.addWidget(power, row, 1)
+            four_layout.addWidget(flow, row, 2)
+        self.channel_selector = QtWidgets.QComboBox()
+        for index, label in enumerate(labels):
+            self.channel_selector.addItem(f"{label} channel", index)
+        four_layout.addWidget(QtWidgets.QLabel("Inspect"), 6, 0)
+        four_layout.addWidget(self.channel_selector, 6, 1, 1, 2)
+        map_widget = QtWidgets.QWidget()
+        map_layout = QtWidgets.QGridLayout(map_widget)
+        map_layout.setContentsMargins(0, 0, 0, 0)
+        map_layout.setSpacing(3)
+        self.channel_map_group = QtWidgets.QButtonGroup(self)
+        self.channel_map_group.setExclusive(True)
+        self.channel_map_buttons = []
+        map_positions = ((0, 1), (1, 2), (2, 1), (1, 0), (1, 1))
+        for index, (label, position) in enumerate(zip(labels, map_positions)):
+            button = QtWidgets.QToolButton()
+            button.setText(label)
+            button.setCheckable(True)
+            button.setMinimumSize(54, 40)
+            button.setToolTip(f"Inspect the {label} parallel channel")
+            self.channel_map_group.addButton(button, index)
+            self.channel_map_buttons.append(button)
+            map_layout.addWidget(button, *position)
+        self.channel_map_buttons[4].setChecked(True)
+        self.channel_selector.setCurrentIndex(4)
+        four_layout.addWidget(QtWidgets.QLabel("Map"), 7, 0)
+        four_layout.addWidget(map_widget, 7, 1, 1, 2)
+        self.four_channel_box.setVisible(False)
 
         self.pressure = _spin(15.5, 0.1, 20.0)
         self.temperature = _spin(290.0, 1.0, 370.0)
@@ -120,6 +181,11 @@ class SubchannelControlPanel(QtWidgets.QWidget):
         mode_layout.addWidget(self.deterministic_mode)
         mode_layout.addWidget(self.statistical_mode)
 
+        self._add_section(form, "LEARNING PROGRESSION", (
+            ("Stage", self.progression),
+            ("Scope", self.progression_note),
+        ))
+        form.addRow(self.four_channel_box)
         self._add_section(form, "BOUNDARY CONDITIONS / POWER", (
             ("Inlet pressure (MPa)", self.pressure),
             ("Inlet temperature (°C)", self.temperature),

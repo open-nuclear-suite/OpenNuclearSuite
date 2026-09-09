@@ -21,6 +21,11 @@ from .two_phase_friction import TWO_PHASE_FRICTION_MODELS
 from .axial_heat_shapes import AXIAL_HEAT_SHAPES
 from .plot_workspace import AnalysisPlotWorkspace
 from .branding import APPLICATION_NAME, SUITE_NAME, SUITE_VERSION, show_about_dialog
+from .neighboring_channels import (
+    CHANNEL_LABELS,
+    CommonPlenumChannelModel,
+    ParallelChannelSetting,
+)
 
 
 def _node_ranges(labels: tuple[str, ...]) -> str:
@@ -43,8 +48,11 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(f"{APPLICATION_NAME} — v{SUITE_VERSION}")
         self.resize(1500, 900)
         self.model = SingleChannelModel()
+        self.four_channel_model = CommonPlenumChannelModel(self.model)
         self.graphs = PyQtGraphHandler()
         self.current_result = None
+        self.current_four_channel_result = None
+        self.selected_channel = 4
         self.selected_node = 0
         self.solution_inspector = None
         self.hot_factor_editor = None
@@ -89,6 +97,11 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
         self.advanced_hot_factors_button.clicked.connect(self.open_hot_factor_editor)
         self.deterministic_mode.toggled.connect(self._update_run_mode_controls)
         self.statistical_mode.toggled.connect(self._update_run_mode_controls)
+        self.progression.currentIndexChanged.connect(self._progression_changed)
+        self.channel_selector.currentIndexChanged.connect(self._selected_channel_changed)
+        self.channel_map_group.idClicked.connect(self.channel_selector.setCurrentIndex)
+        for control in self.channel_power_factors:
+            control.valueChanged.connect(self._four_channel_input_changed)
         self._update_run_mode_controls()
 
         self.workspace_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -116,6 +129,51 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
                 lambda event, source=plot: self._axial_plot_clicked(source, event)
             )
         self.update_illustration()
+
+    @QtCore.Slot()
+    def _progression_changed(self) -> None:
+        stage = str(self.progression.currentData())
+        four = stage == "neswc_independent"
+        self.four_channel_box.setVisible(four)
+        self.statistical_mode.setEnabled(not four)
+        if four and self.statistical_mode.isChecked():
+            self.deterministic_mode.setChecked(True)
+        self.progression_note.setText(
+            "The original center channel plus north, east, south, and west parallel paths. "
+            "Total flow is conserved and redistributed to a common pressure drop; "
+            "there is no axial crossflow or turbulent mixing."
+            if four else
+            "Single axial channel. Start here for conservation, boiling, CHF, and DNBR."
+        )
+        flow_factor_label = self.control_panel.layout().labelForField(self.flow_factor)
+        flow_label = self.control_panel.layout().labelForField(self.flow)
+        if flow_factor_label is not None:
+            flow_factor_label.setText("Total-flow factor" if four else "Hot-channel flow factor")
+        if flow_label is not None:
+            flow_label.setText("Nominal channel flow (kg/s)" if four else "Mass flow (kg/s)")
+        self.run_case()
+
+    @QtCore.Slot()
+    def _selected_channel_changed(self) -> None:
+        self.selected_channel = int(self.channel_selector.currentData())
+        self.channel_map_buttons[self.selected_channel].setChecked(True)
+        if self.current_four_channel_result is not None:
+            self.current_result = self.current_four_channel_result.channels[self.selected_channel]
+            self.plot_workspace.update_four_channel(
+                self.current_four_channel_result, self.selected_channel
+            )
+            self._present_current_result()
+
+    @QtCore.Slot()
+    def _four_channel_input_changed(self) -> None:
+        if str(self.progression.currentData()) == "neswc_independent":
+            self.run_case()
+
+    def _four_channel_settings(self) -> tuple[ParallelChannelSetting, ...]:
+        return tuple(
+            ParallelChannelSetting(label, power.value())
+            for label, power in zip(CHANNEL_LABELS, self.channel_power_factors)
+        )
 
     def _build_geometry_dock(self) -> None:
         dock = QtWidgets.QDockWidget("Channel geometry and 3-D inspection", self)
@@ -198,13 +256,29 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
         except ValueError:
             return
         material = CLADDING_MATERIALS[str(self.cladding.currentData())]
-        regimes = None if self.current_result is None else self.current_result.flow_regime
-        self.graphs.set_four_pin_subchannel_3d(
-            self.illustration, geometry.rod_pitch_m, geometry.rod_outer_diameter_m,
-            geometry.heated_length_m, geometry.unheated_inlet_length_m,
-            geometry.unheated_outlet_length_m, geometry.node_count, material.color,
-            regimes=regimes, selected_node=self.selected_node,
+        four_stage = (
+            str(self.progression.currentData()) == "neswc_independent"
+            and self.current_four_channel_result is not None
         )
+        if four_stage:
+            bundle = self.current_four_channel_result
+            self.graphs.set_neswc_channels_3d(
+                self.illustration, geometry.rod_pitch_m, geometry.rod_outer_diameter_m,
+                geometry.heated_length_m, geometry.unheated_inlet_length_m,
+                geometry.unheated_outlet_length_m, geometry.node_count, material.color,
+                regimes=tuple(channel.flow_regime for channel in bundle.channels),
+                selected_channel=self.selected_channel,
+                limiting_channel=bundle.limiting_channel_index,
+                selected_node=self.selected_node,
+            )
+        else:
+            regimes = None if self.current_result is None else self.current_result.flow_regime
+            self.graphs.set_four_pin_subchannel_3d(
+                self.illustration, geometry.rod_pitch_m, geometry.rod_outer_diameter_m,
+                geometry.heated_length_m, geometry.unheated_inlet_length_m,
+                geometry.unheated_outlet_length_m, geometry.node_count, material.color,
+                regimes=regimes, selected_node=self.selected_node,
+            )
         self.geometry_info.setText(
             f"Total channel length: {geometry.total_channel_length_m:.3f} m<br>"
             f"Heated length: {geometry.heated_length_m:.3f} m<br>"
@@ -217,7 +291,13 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
             f"Wetted perimeter: {geometry.wetted_perimeter_m * 1000:.3f} mm<br>"
             f"Hydraulic diameter: {geometry.hydraulic_diameter_m * 1000:.3f} mm<br>"
             f"Relative roughness: {geometry.roughness_m / geometry.hydraulic_diameter_m:.3g}<br>"
-            "Current conservation and pressure-drop solution spans the heated section."
+            + (
+                "The center channel and its N/E/S/W parallel neighbors are shown. "
+                "Cyan marks the selected channel; red marks the limiting channel. "
+                "Flows satisfy a common-plenum pressure balance; axial crossflow is not solved."
+                if four_stage else
+                "Current conservation and pressure-drop solution spans the heated section."
+            )
         )
 
     def _geometry(self) -> ChannelGeometry:
@@ -381,11 +461,31 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
     def run_case(self) -> None:
         try:
             geometry = self._geometry()
-            result = self.model.solve(geometry, self._inputs())
+            if str(self.progression.currentData()) == "neswc_independent":
+                bundle = self.four_channel_model.solve(
+                    geometry, self._inputs(), self._four_channel_settings()
+                )
+                self.current_four_channel_result = bundle
+                self.selected_channel = int(self.channel_selector.currentData())
+                result = bundle.channels[self.selected_channel]
+                self.plot_workspace.update_four_channel(bundle, self.selected_channel)
+                for control, ratio in zip(self.channel_flow_factors, bundle.flow_ratios):
+                    control.setValue(float(ratio))
+                self._update_channel_map(bundle)
+            else:
+                self.current_four_channel_result = None
+                self.plot_workspace.clear_four_channel()
+                result = self.model.solve(geometry, self._inputs())
         except Exception as error:
             self.summary.setText(f"Calculation unavailable: {error}")
             return
         self.current_result = result
+        self._present_current_result()
+
+    def _present_current_result(self) -> None:
+        result = self.current_result
+        if result is None:
+            return
         self.channel_balance_summary.setText(
             "<b>CHANNEL TOTALS</b><br>"
             f"Heat transferred: {result.deposited_power_W / 1000.0:.2f} kW<br>"
@@ -421,6 +521,7 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
             if np.isfinite(result.bulk_boiling_height_m) else "not reached"
         )
         self.summary.setText(
+            self._four_channel_summary() +
             f"Outlet: {result.bulk_temperature_C[-1]:.2f} °C<br>"
             f"Peak wall: {result.peak_wall_temperature_C:.2f} °C<br>"
             f"Minimum valid DNBR: {result.minimum_dnbr:.3f}<br>"
@@ -439,6 +540,46 @@ class SubchannelLaboratoryWindow(QtWidgets.QMainWindow):
         )
         self._update_node_inspector()
         self.update_illustration()
+
+    def _four_channel_summary(self) -> str:
+        bundle = self.current_four_channel_result
+        if bundle is None:
+            return ""
+        limiting = bundle.limiting_channel_index
+        node = bundle.limiting_node_index
+        selected = bundle.settings[self.selected_channel]
+        limiting_text = "No channel has an in-range DNBR"
+        if limiting is not None and node is not None:
+            channel = bundle.channels[limiting]
+            limiting_text = (
+                f"Limiting channel: {bundle.settings[limiting].label}; node {node + 1} "
+                f"at z={channel.z_m[node]:.3f} m; DNBR={channel.dnbr[node]:.3f}"
+            )
+        return (
+            "<b>STAGE 2 — NESWC COMMON-PLENUM CHANNELS</b><br>"
+            "Fixed total flow; equalized path pressure drop; no axial crossflow or mixing.<br>"
+            f"Balance: {'converged' if bundle.converged else 'NOT CONVERGED'} in "
+            f"{bundle.iteration_count} iterations; ΔP spread {bundle.pressure_drop_spread_kpa:.4f} kPa.<br>"
+            f"Total flow {bundle.total_mass_flow_kg_s:.4f} kg/s; common ΔP "
+            f"{bundle.common_pressure_drop_kpa:.3f} kPa.<br>"
+            f"Inspecting: {selected.label} (power ×{selected.power_multiplier:.3f}, "
+            f"solved flow ×{bundle.flow_ratios[self.selected_channel]:.3f})<br>"
+            f"{limiting_text}<br><br>"
+        )
+
+    def _update_channel_map(self, bundle) -> None:
+        limiting = bundle.limiting_channel_index
+        for index, (button, setting) in enumerate(zip(self.channel_map_buttons, bundle.settings)):
+            channel = bundle.channels[index]
+            dnbr = "--" if not np.isfinite(channel.minimum_dnbr) else f"{channel.minimum_dnbr:.2f}"
+            marker = " ● LIMIT" if index == limiting else ""
+            button.setText(
+                f"{button.toolTip().split()[2]}  flow×{bundle.flow_ratios[index]:.2f}"
+                f"\nDNBR {dnbr}{marker}"
+            )
+            button.setStyleSheet(
+                "QToolButton { border: 2px solid #f85149; }" if index == limiting else ""
+            )
 
     @QtCore.Slot()
     def run_statistics(self) -> None:

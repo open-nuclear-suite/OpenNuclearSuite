@@ -53,6 +53,14 @@ The first implementation chunk provides:
 - a plot-linked node inspector reporting velocity, mass flux, Reynolds,
   Prandtl and Nusselt numbers, friction factor, cumulative pressure drop,
   quality, void fraction, and DNBR.
+- a progressive learning-stage selector that defaults to the single-channel
+  model and exposes the center plus four common-plenum cardinal neighbors next;
+- a selectable N/E/S/W/C channel map with prescribed per-channel power and solved flow
+  multipliers, axial coolant-temperature and DNBR comparison plots, and explicit
+  limiting-channel/limiting-node identification;
+- a corresponding orbitable 3-D rod array showing the original center channel
+  with north, east, south, and west channel cells, their axial regime tracks,
+  the selected channel and node, and the limiting channel.
 
 The total illustrated channel length is the heated length plus the declared
 unheated inlet and outlet lengths. The present conservation and pressure-drop
@@ -138,12 +146,17 @@ conditions so the file remains self-contained when filtered or plotted.
 | 8 | Deterministic and introductory statistical hot-channel factors | Implemented; advanced statistics deferred |
 | 9 | Analytic axial heat shapes | Six normalized profiles implemented; editable/CSV profiles deferred |
 | 10 | CSV result export | Implemented for deterministic channel results |
-| 11 | Coupled parallel channels, turbulent mixing and pressure-driven crossflow | Not started |
-| 12 | Pin-resolved square assembly | Not started |
-| 13 | Hexagonal lattice and bounded neighboring-assembly studies | Not started |
+| 11 | NESWC common-plenum channels with fixed total flow and equal pressure drop | Implemented |
+| 12 | Turbulent mixing and pressure-driven crossflow | Not started |
+| 13 | Pin-resolved square assembly | Not started |
+| 14 | Hexagonal lattice and bounded neighboring-assembly studies | Not started |
 
-The present model is therefore still the completed **single-channel teaching
-stage**. It does not yet solve lateral mass, momentum, or energy exchange.
+The default remains the completed **single-channel teaching stage**. The next
+progression stage runs the center and four neighboring copies of that solver with common inlet
+conditions and geometry. It conserves their total flow and iterates the channel
+flows until the five heated-path pressure drops agree. This is common-plenum
+parallel-flow coupling, not axial crossflow CFD: no mass, momentum, or enthalpy
+is exchanged between channels along their heated lengths.
 
 The main screen retains the simple channel-wide power and flow factors. The
 separate **Advanced axial nuclear-power factors** window adds any number of localized power
@@ -215,8 +228,8 @@ python -m unittest simulators.SubchannelLaboratory.test_single_channel -v
 - optional MacBeth and modified-Zuber CHF comparisons after their complete
   open formulations and selection boundaries are independently verified; GEXL
   remains excluded;
-- a four-channel crossflow teaching model, followed by pin-resolved square
-  assemblies and later hexagonal-lattice comparison;
+- a crossflow teaching model, followed by pin-resolved square assemblies and later hexagonal-lattice
+  comparison;
 - bounded neighboring-assembly studies only after single-assembly scaling is
   characterized;
 - expanded statistical hot-channel-factor composition, including correlated

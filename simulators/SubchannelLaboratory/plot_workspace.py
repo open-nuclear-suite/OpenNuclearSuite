@@ -46,6 +46,12 @@ class AnalysisPlotWorkspace(QtWidgets.QWidget):
         self.wall_temperature_histogram = graphs.line_plot(
             "Statistical peak wall temperature", "Peak wall temperature (°C)", "Samples"
         )
+        self.channel_temperature_plot = graphs.line_plot(
+            "NESWC coolant temperature", "Heated height (m)", "Temperature (°C)"
+        )
+        self.channel_dnbr_plot = graphs.line_plot(
+            "NESWC DNBR comparison", "Heated height (m)", "DNBR"
+        )
         for title, first, second in (
             ("Thermal", self.temperature_plot, self.heat_profile_plot),
             ("Boiling / CHF", self.margin_plot, self.phase_plot),
@@ -60,6 +66,13 @@ class AnalysisPlotWorkspace(QtWidgets.QWidget):
             splitter.setSizes([360, 360])
             self.tabs.addTab(splitter, title)
         self.tabs.setTabEnabled(3, False)
+        comparison = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        comparison.setChildrenCollapsible(False)
+        comparison.addWidget(self.channel_temperature_plot)
+        comparison.addWidget(self.channel_dnbr_plot)
+        comparison.setSizes([360, 360])
+        self.comparison_tab_index = self.tabs.addTab(comparison, "NESWC comparison")
+        self.tabs.setTabEnabled(self.comparison_tab_index, False)
         self.axial_plots = (
             self.temperature_plot, self.heat_profile_plot, self.margin_plot,
             self.phase_plot, self.pressure_drop_plot, self.hydraulic_local_plot,
@@ -193,3 +206,37 @@ class AnalysisPlotWorkspace(QtWidgets.QWidget):
             self.wall_temperature_histogram, result.peak_wall_temperature_C
         )
         self.tabs.setTabEnabled(3, True)
+
+    def update_four_channel(self, result, selected_channel: int) -> None:
+        colors = ("#58a6ff", "#d29922", "#bc8cff", "#3fb950", "#ff7b72")
+        temperature_lines = []
+        dnbr_lines = []
+        limiting = result.limiting_channel_index
+        for index, (setting, channel, color) in enumerate(
+            zip(result.settings, result.channels, colors)
+        ):
+            suffix = " [selected]" if index == selected_channel else ""
+            if index == limiting:
+                suffix += " [limiting]"
+            temperature_lines.append(
+                (f"{setting.label}{suffix}", channel.z_m, channel.bulk_temperature_C, color)
+            )
+            dnbr_lines.append((f"{setting.label}{suffix}", channel.z_m, channel.dnbr, color))
+        self.graphs.set_lines(self.channel_temperature_plot, temperature_lines)
+        self.graphs.set_lines(self.channel_dnbr_plot, dnbr_lines)
+        self.channel_dnbr_plot.addItem(pg.InfiniteLine(
+            pos=1.0, angle=0, pen=pg.mkPen("#f85149", width=1, style=QtCore.Qt.DashLine)
+        ))
+        node = result.limiting_node_index
+        if limiting is not None and node is not None:
+            channel = result.channels[limiting]
+            self.channel_dnbr_plot.addItem(pg.ScatterPlotItem(
+                [float(channel.z_m[node])], [float(channel.dnbr[node])], size=13,
+                brush=pg.mkBrush("#f85149"), pen=pg.mkPen("#ffffff", width=1),
+            ))
+        self.tabs.setTabEnabled(self.comparison_tab_index, True)
+
+    def clear_four_channel(self) -> None:
+        self.channel_temperature_plot.clear()
+        self.channel_dnbr_plot.clear()
+        self.tabs.setTabEnabled(self.comparison_tab_index, False)

@@ -25,6 +25,11 @@ from simulators.SubchannelLaboratory.chf_correlations import (
     bowring_critical_heat_flux_W_m2,
     epri_1_critical_heat_flux_W_m2,
 )
+from simulators.SubchannelLaboratory.neighboring_channels import (
+    CHANNEL_LABELS,
+    CommonPlenumChannelModel,
+    ParallelChannelSetting,
+)
 from simulators.SubchannelLaboratory.groeneveld_lut import (
     PRESSURE_MPA,
     interpolate_groeneveld_2006,
@@ -552,6 +557,75 @@ class SingleChannelTests(unittest.TestCase):
         self.assertAlmostEqual(
             float(rows[-1]["total_heated_dP_kPa"]), result.total_heated_pressure_drop_kpa
         )
+
+    def test_neswc_common_plenum_conserves_total_flow_and_equalizes_pressure(self) -> None:
+        settings = tuple(
+            ParallelChannelSetting(label, power)
+            for label, power in zip(
+                CHANNEL_LABELS,
+                (1.0, 1.0, 1.0, 1.0, 1.08),
+            )
+        )
+        result = CommonPlenumChannelModel(self.model).solve(
+            self.geometry, self.inputs, settings
+        )
+        self.assertEqual(len(result.channels), 5)
+        self.assertGreater(
+            result.channels[4].deposited_power_W, result.channels[0].deposited_power_W
+        )
+        self.assertGreater(
+            result.channels[4].bulk_temperature_C[-1],
+            result.channels[0].bulk_temperature_C[-1],
+        )
+        self.assertAlmostEqual(
+            float(np.sum(result.mass_flows_kg_s)), result.total_mass_flow_kg_s
+        )
+        self.assertTrue(result.converged)
+        self.assertLess(result.pressure_drop_spread_kpa, 0.1)
+        self.assertLess(result.mass_flows_kg_s[4], result.mass_flows_kg_s[0])
+        for mass_flow, channel in zip(result.mass_flows_kg_s, result.channels):
+            gained = mass_flow * (
+                channel.outlet_enthalpy_kj_kg - channel.inlet_enthalpy_kj_kg
+            ) * 1000.0
+            self.assertAlmostEqual(gained, channel.deposited_power_W, delta=1.0)
+            self.assertTrue(np.all(np.diff(channel.enthalpy_kj_kg) > 0.0))
+
+    def test_neswc_limiting_location_matches_global_minimum_dnbr(self) -> None:
+        settings = tuple(
+            ParallelChannelSetting(label, 1.0 + 0.04 * index)
+            for index, label in enumerate(CHANNEL_LABELS)
+        )
+        result = CommonPlenumChannelModel(self.model).solve(
+            self.geometry,
+            ChannelInputs(inlet_temperature_C=270.0, mass_flow_kg_s=0.20),
+            settings,
+        )
+        channel_index = result.limiting_channel_index
+        node_index = result.limiting_node_index
+        self.assertIsNotNone(channel_index)
+        self.assertIsNotNone(node_index)
+        minima = [channel.minimum_dnbr for channel in result.channels]
+        self.assertEqual(channel_index, int(np.nanargmin(minima)))
+        self.assertEqual(
+            node_index, int(np.nanargmin(result.channels[channel_index].dnbr))
+        )
+
+    def test_neswc_symmetric_channels_split_total_flow_equally(self) -> None:
+        settings = tuple(ParallelChannelSetting(label) for label in CHANNEL_LABELS)
+        result = CommonPlenumChannelModel(self.model).solve(
+            self.geometry, self.inputs, settings
+        )
+        np.testing.assert_allclose(result.flow_ratios, np.ones(5), rtol=1.0e-10)
+        drops = [channel.total_heated_pressure_drop_kpa for channel in result.channels]
+        np.testing.assert_allclose(drops, np.full(5, drops[0]), rtol=1.0e-10)
+
+    def test_neswc_stage_rejects_wrong_channel_count(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exactly five"):
+            CommonPlenumChannelModel(self.model).solve(
+                self.geometry,
+                self.inputs,
+                (ParallelChannelSetting("only"),),
+            )
 
 
 if __name__ == "__main__":

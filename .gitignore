@@ -33,3 +33,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Local Codex workspace handoff
+/CODEX_HANDOFF.md
